@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { type Raster, celToRaster, celKey, flattenFrame, frameIndex, hexToRgba, layerIndex, readGrid } from '../../core'
+import { type Raster, celToRaster, celKey, flattenFrame, frameIndex, layerIndex, readGrid } from '../../core'
 import { defineTool, imageResult, jsonResult } from '../registry'
 import { renderPreview } from '../render'
 import { LAYER_REF_DESC, colorArg, describeFrame, frameRef, layerRef, obj, parseColor, resolveFrame, resolveLayer, targetShape } from '../util'
@@ -92,7 +92,7 @@ export const readingTools = [
         const b = typeof args.background === 'string' ? args.background.trim().toLowerCase() : ''
         if (b === 'checker' || b === 'checkerboard') background = 'checker'
         else if (b === 'transparent' || b === 'none') background = 'none'
-        else background = parseColor(doc, args.background) || hexToRgba('#00000000')
+        else background = parseColor(doc, args.background)
       }
       const onionOn = args.onion ? { before: Math.max(1, session.onion.before), after: Math.max(1, session.onion.after), opacity: session.onion.opacity } : undefined
       const r = renderPreview(doc, {

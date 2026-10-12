@@ -75,9 +75,10 @@ export interface LmLoadSettings {
   ttlMinutes: number
 }
 
-/** The default config folder: `~/PixelStudio/config`. */
+/** The default config folder: `~/PixelStudio/config` (or `$PIXEL_STUDIO_HOME/config` when that variable is set). */
 export function defaultConfigDir(): string {
-  return path.join(os.homedir(), 'PixelStudio', 'config')
+  const override = process.env['PIXEL_STUDIO_HOME']?.trim()
+  return path.join(override ? path.resolve(override) : path.join(os.homedir(), 'PixelStudio'), 'config')
 }
 
 export const CONFIG_FILES = ['providers.md', 'roles.md'] as const

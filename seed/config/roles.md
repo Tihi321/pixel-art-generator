@@ -5,7 +5,7 @@ aliases:
   lmstudio: lmstudio/nail-qwen3.6-35b-a3b-mtp
   strata: strata/qwen3.8-flash-next
   cloud: deepseek/deepseek-flash
-  claude: anthropic/claude-sonnet-4-5
+  claude: anthropic/claude-sonnet-5-5
 roles:
   # The chat agent that edits the artwork through tools. The first available model is used, the rest are fallbacks.
   artist:

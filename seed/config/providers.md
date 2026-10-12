@@ -129,22 +129,22 @@ providers:
     concurrency: 4
     models:
       # to verify
-      - id: claude-sonnet-4-5
+      - id: claude-opus-5-5
         family: claude
         context: 200000
         max_output: 16000
-        price_in: 3
-        price_out: 15
-        price_cached_in: 0.30
         tools: true
         vision: true
-      - id: claude-haiku-4-5
+      - id: claude-sonnet-5-5
         family: claude
         context: 200000
         max_output: 16000
-        price_in: 1
-        price_out: 5
-        price_cached_in: 0.10
+        tools: true
+        vision: true
+      - id: claude-haiku-5-5
+        family: claude
+        context: 200000
+        max_output: 16000
         tools: true
         vision: true
   - id: gemini
@@ -186,7 +186,7 @@ providers:
 
 One entry per provider. Edit this file in `~/PixelStudio/config/` and Pixel Studio picks the change up after a reload. API keys are never written here: `api_key_env` names an environment variable, and Pixel Studio also looks in the Windows credential store under that name (Settings stores them there).
 
-A model is written `provider/model`, for example `lmstudio/google/gemma-4-e4b`. Prices are USD per 1M tokens and only used for the cost shown in the chat (there is no budget). The OpenRouter, OpenAI, Anthropic and Gemini entries are examples marked "to verify": model ids and prices there may be out of date. The DeepSeek ones come from scriptorium's config (peak prices).
+A model is written `provider/model`, for example `lmstudio/google/gemma-4-e4b`. Prices are USD per 1M tokens and only used for the cost shown in the chat (there is no budget). The OpenRouter, OpenAI, Anthropic and Gemini entries are examples marked "to verify": model ids and prices there may be out of date. The Anthropic 5.5 models have no prices here (the cost shows as 0 until you add `price_in`, `price_out` and `price_cached_in`). The DeepSeek ones come from scriptorium's config (peak prices).
 
 ## Fields of a provider
 

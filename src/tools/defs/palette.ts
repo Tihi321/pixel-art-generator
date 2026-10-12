@@ -7,6 +7,7 @@ import {
   createRemoveColorsCommand,
   createSetPaletteCommand,
   exportPalette,
+  frameIndex,
   listBuiltinPalettes,
   normalizeHex,
   parsePalette
@@ -22,6 +23,8 @@ import {
   ok,
   paletteNotFound,
   plural,
+  resolveFrame,
+  resolveLayer,
   safeFileName,
   summarizePaletteColors,
   withExtension
@@ -206,10 +209,8 @@ export const paletteTools = [
       const doc = ctx.session.doc
       const target = palette ? await findPalette(ctx, palette) : null
       if (palette && !target) throw paletteNotFound(palette)
-      const layerObj = layer === undefined ? undefined : doc.layers.find((l) => l.id === layer || l.name.toLowerCase() === String(layer).toLowerCase()) ?? (typeof layer === 'number' ? doc.layers[layer] : /^\d+$/.test(String(layer)) ? doc.layers[Number(layer)] : undefined)
-      if (layer !== undefined && !layerObj) throw new Error(`Layer ${JSON.stringify(layer)} not found.`)
-      const frameObj = frame === undefined ? undefined : doc.frames.find((f) => f.id === frame) ?? (typeof frame === 'number' ? doc.frames[frame] : /^\d+$/.test(String(frame)) ? doc.frames[Number(frame)] : undefined)
-      if (frame !== undefined && !frameObj) throw new Error(`Frame ${JSON.stringify(frame)} not found.`)
+      const layerObj = layer === undefined ? undefined : resolveLayer(ctx.session, layer)
+      const frameObj = frame === undefined ? undefined : resolveFrame(ctx.session, frame)
       const used = target ?? clonePalette(doc.palette)
       ctx.session.execute(
         createRemapToPaletteCommand(doc, {
@@ -221,7 +222,7 @@ export const paletteTools = [
         })
       )
       return ok(
-        `Remapped ${layerObj ? `layer "${layerObj.name}"` : 'all pixel layers'}, ${frameObj ? `frame ${doc.frames.indexOf(frameObj)}` : 'all frames'} to palette "${used.name}" (${plural(used.colors.length, 'color')}).`
+        `Remapped ${layerObj ? `layer "${layerObj.name}"` : 'all pixel layers'}, ${frameObj ? `frame ${frameIndex(doc, frameObj.id)}` : 'all frames'} to palette "${used.name}" (${plural(used.colors.length, 'color')}).`
       )
     }
   }),
