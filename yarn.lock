@@ -4455,6 +4455,8 @@ __metadata:
     yaml: "npm:^2.9.1"
     zod: "npm:^4.6.5"
     zustand: "npm:^5.0.15"
+  bin:
+    pixel-studio-mcp: ./out/mcp-stdio/index.js
   languageName: unknown
   linkType: soft
 
