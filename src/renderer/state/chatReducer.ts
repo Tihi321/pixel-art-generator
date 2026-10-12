@@ -118,6 +118,14 @@ export function applyEvent(state: ChatState, ev: AgentUiEvent): ChatState {
   }
 }
 
+/** A saved chat shown again: its events replayed. A turn that never finished (the app was closed) shows as stopped. */
+export function replayChat(events: AgentUiEvent[]): ChatState {
+  let state = initialChat()
+  for (const ev of events) state = applyEvent(state, ev)
+  if (state.running && state.runId) state = applyEvent(state, { type: 'done', runId: state.runId, reason: 'aborted', steps: 0, usage: emptyUsage(), costUsd: 0 })
+  return state
+}
+
 /** Compact token count: 1234 -> "1.2k". */
 export function formatTokens(n: number): string {
   return n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)

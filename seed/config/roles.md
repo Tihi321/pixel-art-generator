@@ -2,17 +2,17 @@
 kind: roles
 # Names that stand for a provider/model, usable in the role lists below. Change one here and every role that uses it follows.
 aliases:
-  lmstudio: lmstudio/nail-qwen3.6-35b-a3b-mtp
+  lmstudio: lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
   strata: strata/qwen3.8-flash-next
   cloud: deepseek/deepseek-flash
   claude: anthropic/claude-sonnet-5-5
 roles:
   # The chat agent that edits the artwork through tools. The first available model is used, the rest are fallbacks.
   artist:
-    models: [lmstudio, strata, cloud, claude]
+    models: [lmstudio]
   # Colour schemes from a prompt ("a moody 12-colour forest palette").
   palette:
-    models: [lmstudio, strata, cloud]
+    models: [lmstudio]
 ---
 # Roles
 

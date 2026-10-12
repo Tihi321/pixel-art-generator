@@ -100,6 +100,7 @@ export function OpenDialog() {
               if (ok) close()
             })
           }}
+          data-testid="open-confirm"
         >
           Open
         </button>

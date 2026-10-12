@@ -11,6 +11,12 @@ export const AGENT_IPC = {
   reset: 'agent:reset',
   /** () => AgentState */
   getState: 'agent:getState',
+  /** () => ChatSummary[]. The saved chats (`~/PixelStudio/chats`), newest first. */
+  listChats: 'agent:listChats',
+  /** (chatId: string) => OpenedChat. Makes a saved chat the current conversation (not while a turn runs). */
+  openChat: 'agent:openChat',
+  /** (chatId: string) => AgentState. Deletes a saved chat; deleting the current one starts a new conversation. */
+  deleteChat: 'agent:deleteChat',
   /** main -> renderer push: AgentUiEvent */
   event: 'agent:event'
 } as const
@@ -26,6 +32,10 @@ export const LLM_IPC = {
   deleteKey: 'llm:deleteKey',
   /** () => LlmOverview. Re-reads providers.md / roles.md and asks the providers for their models. */
   reload: 'llm:reload',
+  /** () => LlmOverview. Asks the providers for their models again (installed LM Studio models), without re-reading the config files. */
+  refreshModels: 'llm:refreshModels',
+  /** (tokens: number | null) => LlmOverview. The context LM Studio loads models with; null goes back to providers.md. */
+  setContextSize: 'llm:setContextSize',
   /** () => string. Opens ~/PixelStudio/config in the file manager. Resolves to an error message or ''. */
   openConfigFolder: 'llm:openConfigFolder'
 } as const
@@ -46,6 +56,23 @@ export interface AgentState {
   runId: string | null
   /** Messages in the conversation kept in main (user, assistant and tool messages). */
   messageCount: number
+  /** The current conversation; it is saved under this id after its first turn. */
+  chatId: string
+}
+
+export interface ChatSummary {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  /** Messages the user sent. */
+  turns: number
+}
+
+/** A saved chat opened again: replay `events` through the Chat panel's reducer to show it. */
+export interface OpenedChat {
+  state: AgentState
+  events: AgentUiEvent[]
 }
 
 export interface AgentUsage {
@@ -109,6 +136,10 @@ export interface LlmProviderInfo {
   keyStatus: KeyStatus
   /** `provider/model` refs. */
   models: string[]
+  /** The context window the running server reports (Strata). */
+  serverContext?: number
+  /** Pixel Studio loads this provider's models (LM Studio): with `LlmOverview.contextSize`. */
+  loadsModels: boolean
 }
 
 export interface LlmOverview {
@@ -120,6 +151,10 @@ export interface LlmOverview {
   defaultModel: string | null
   configDir: string
   dataDir: string
+  /** Context window (tokens) LM Studio models are loaded with. */
+  contextSize: number
+  /** True when it comes from Settings, false when from providers.md (`lmstudio_context`). */
+  contextSizeSet: boolean
   /** Set when providers.md or roles.md could not be read. */
   error?: string
 }

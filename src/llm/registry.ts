@@ -25,6 +25,8 @@ export interface ProviderInfo {
   concurrency: number
   /** `concurrency: auto`: `concurrency` follows the server's own slot count (see `syncServerSlots`). */
   concurrencyAuto: boolean
+  /** The context window the server says it runs with (Strata's `/status`), from the last `syncServerSlots`. */
+  serverContext?: number
   rpm?: number
   discover: boolean
   /** Send the JSON schema as `response_format` (`openai-compat`). */
@@ -115,6 +117,14 @@ export class ModelRegistry {
   /** The slot counts servers reported for `concurrency: auto` providers, kept across config reloads. */
   private serverSlots = new Map<string, number>()
   private lmLoad: LmLoadSettings = { parallel: 1, context: 32768, ttlMinutes: 60 }
+  /** The models providers.md lists, kept so a model that shows up on its server later gets its settings back. */
+  private configured = new Map<string, ModelInfo>()
+  /** Per `discover` provider: the model ids its server reported at the last discovery that answered. Its list is only these. */
+  private installed = new Map<string, Set<string>>()
+  /** The context windows servers reported (see `syncServerSlots`), kept across config reloads. */
+  private serverContexts = new Map<string, number>()
+  /** The context size from the app's settings: LM Studio loads every model with it, over providers.md. */
+  private contextOverride: number | null = null
 
   /** `configDir` holds providers.md and roles.md (see `ensureConfigDir`). */
   constructor(
@@ -146,6 +156,7 @@ export class ModelRegistry {
         apiKeyEnv: p.api_key_env,
         concurrency: p.concurrency === 'auto' ? (this.serverSlots.get(p.id) ?? 1) : p.concurrency,
         concurrencyAuto: p.concurrency === 'auto',
+        serverContext: this.serverContexts.get(p.id),
         rpm: p.rpm,
         discover: p.discover,
         jsonSchema: p.json_schema,
@@ -162,7 +173,7 @@ export class ModelRegistry {
           id: m.id,
           family: m.family,
           // a model the registry loads itself gets the context window it loads it with
-          context: p.load_models ? Math.min(m.context ?? Infinity, m.load_context ?? this.lmLoad.context) : m.context,
+          context: p.load_models ? Math.min(m.context ?? Infinity, this.contextOverride ?? m.load_context ?? this.lmLoad.context) : m.context,
           loadContext: m.load_context,
           loadParallel: m.load_parallel,
           maxOutput: m.max_output,
@@ -178,12 +189,21 @@ export class ModelRegistry {
     }
     this.providers = providers
     this.models = models
+    this.configured = new Map(models)
     this.roles = roles.data
     // Keep what discovery found earlier, so a config reload does not forget it.
     for (const d of discoveredBefore) {
       const prov = this.providers.get(d.provider.id)
       if (prov && !this.models.has(d.ref)) this.models.set(d.ref, { ...d, provider: prov })
     }
+    for (const p of this.providers.values()) this.dropMissing(p)
+  }
+
+  /** A `discover` provider lists only the models its server reported last time (none of the configured ones it doesn't have). */
+  private dropMissing(p: ProviderInfo): void {
+    const ids = p.discover ? this.installed.get(p.id) : undefined
+    if (!ids) return
+    for (const [ref, m] of this.models) if (m.provider === p && !ids.has(m.id)) this.models.delete(ref)
   }
 
   private setupClient(info: ProviderInfo, keys: KeyResolver): void {
@@ -227,17 +247,30 @@ export class ModelRegistry {
     info.available = true
   }
 
-  /** `GET /models` on every provider with `discover: true`. Adds unknown models, family guessed from the id. LM Studio also reports tool and vision support. */
+  /**
+   * Asks every provider with `discover: true` which models it has, and makes that its model list: the installed models,
+   * with the settings providers.md gives them, and the unknown ones with the family guessed from the id. Configured
+   * models the server doesn't have are left out, and so are embedding and draft models. LM Studio also reports tool and vision support.
+   */
   async discover(signal?: AbortSignal): Promise<{ provider: string; found: number; error?: string }[]> {
     const out: { provider: string; found: number; error?: string }[] = []
     for (const p of this.providers.values()) {
       if (!p.discover || !p.available || !(p.client instanceof OpenAiCompatClient)) continue
       try {
-        const ids = await p.client.listModels(signal)
+        const listed = await p.client.listModels(signal)
         const info = await p.client.localModelInfo(signal)
+        // LM Studio's own list has every downloaded model (`/v1/models` may list only the loaded ones) and marks the embedding and draft ones
+        const ids = [...new Set([...listed, ...info.keys()])].filter((id) => info.get(id)?.chat ?? !/embed/i.test(id))
+        this.installed.set(p.id, new Set(ids))
+        this.dropMissing(p)
         for (const id of ids) {
           const ref = `${p.id}/${id}`
           if (this.models.has(ref)) continue
+          const known = this.configured.get(ref)
+          if (known) {
+            this.models.set(ref, { ...known, provider: p })
+            continue
+          }
           const li = info.get(id)
           this.models.set(ref, {
             ref,
@@ -282,10 +315,13 @@ export class ModelRegistry {
         return res.ok ? ((await res.json()) as Record<string, unknown>) : null
       }
       let slots = 1
+      let context: number | undefined
       try {
         const status = await get(`${base}/status`).catch(() => null)
         const n = Number((status?.concurrency as { serving?: unknown } | undefined)?.serving)
         if (Number.isInteger(n) && n >= 1) slots = Math.min(n, 16)
+        const ctx = Number((status?.context as { native?: unknown } | undefined)?.native)
+        if (Number.isInteger(ctx) && ctx > 0) context = ctx
         else {
           // LM Studio: its native API sits next to the OpenAI-compatible /v1
           const lm = await get(`${base.replace(/\/v1$/, '')}/api/v1/models`)
@@ -304,6 +340,9 @@ export class ModelRegistry {
         /* the server is down or restarting: one at a time until it answers */
       }
       this.serverSlots.set(p.id, slots)
+      if (context) this.serverContexts.set(p.id, context)
+      else this.serverContexts.delete(p.id)
+      p.serverContext = context
       if (p.concurrency !== slots) {
         changed.push({ provider: p, from: p.concurrency, to: slots })
         p.concurrency = slots
@@ -322,9 +361,19 @@ export class ModelRegistry {
   }
 
   /** How a `load_models` provider loads `model`: the provider defaults, with the model's own `load_context` / `load_parallel` over them. */
+  /** The context LM Studio loads models with: the app's setting, else (null) providers.md decides. */
+  setContextSize(tokens: number | null): void {
+    this.contextOverride = tokens
+  }
+
+  /** The context LM Studio loads models with when nothing overrides it per model. */
+  get lmContext(): { effective: number; fromConfig: number } {
+    return { effective: this.contextOverride ?? this.lmLoad.context, fromConfig: this.lmLoad.context }
+  }
+
   loadConfigFor(provider: string, model: string): LmLoadSettings {
     const m = this.models.get(`${provider}/${model}`)
-    return { parallel: m?.loadParallel ?? this.lmLoad.parallel, context: m?.loadContext ?? this.lmLoad.context, ttlMinutes: this.lmLoad.ttlMinutes }
+    return { parallel: m?.loadParallel ?? this.lmLoad.parallel, context: this.contextOverride ?? m?.loadContext ?? this.lmLoad.context, ttlMinutes: this.lmLoad.ttlMinutes }
   }
 
   /** A `provider/model`, or an alias from roles.md resolved to its model. */

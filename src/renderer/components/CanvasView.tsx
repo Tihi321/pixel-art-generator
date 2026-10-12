@@ -14,7 +14,7 @@ import {
 } from '../lib/viewport'
 import { placeAsset } from '../state/assetActions'
 import { input } from '../state/input'
-import { session } from '../state/session'
+import { session, workspace } from '../state/session'
 import { useUi } from '../state/ui'
 import { ASSET_DRAG_TYPE } from './AssetsPanel'
 
@@ -70,7 +70,6 @@ export function CanvasView() {
   const panRef = useRef<{ sx: number; sy: number; vp: Viewport } | null>(null)
   const rafRef = useRef(0)
   const drawRef = useRef<() => void>(() => undefined)
-  const fitKeyRef = useRef('')
 
   const schedule = useCallback(() => {
     if (rafRef.current) return
@@ -254,12 +253,14 @@ export function CanvasView() {
     return () => ro.disconnect()
   }, [])
 
-  // Fit when the view size first becomes known and whenever the document is replaced or resized.
+  // Fit when the view size first becomes known and whenever the document is replaced or resized. Each tab
+  // remembers what it was fitted to, so coming back to a tab keeps its own view.
   const docKey = `${session.doc.id}:${session.doc.width}x${session.doc.height}`
   useEffect(() => {
     if (viewSize.w < 10 || viewSize.h < 10) return
-    if (fitKeyRef.current === docKey) return
-    fitKeyRef.current = docKey
+    const tab = workspace.active
+    if (tab.fitKey === docKey) return
+    tab.fitKey = docKey
     useUi.getState().setViewport(fitViewport(viewSize.w, viewSize.h, session.doc.width, session.doc.height))
   }, [docKey, viewSize])
 

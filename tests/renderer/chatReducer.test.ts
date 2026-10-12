@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentUiEvent } from '../../src/shared/agent'
-import { type ChatState, addError, applyEvent, canUndoAgentTurn, formatCost, formatTokens, initialChat, resetChat } from '../../src/renderer/state/chatReducer'
+import { type ChatState, addError, applyEvent, canUndoAgentTurn, formatCost, formatTokens, initialChat, replayChat, resetChat } from '../../src/renderer/state/chatReducer'
 
 const R = 'run1'
 const usage = { inputTokens: 100, cachedInputTokens: 0, outputTokens: 20 }
@@ -11,6 +11,13 @@ function play(events: AgentUiEvent[], from: ChatState = initialChat()): ChatStat
 const start: AgentUiEvent = { runId: R, type: 'start', label: 'Agent: hi', text: 'hi' }
 
 describe('chat reducer', () => {
+  it('replays a saved chat; a turn that never finished shows as stopped', () => {
+    const s = replayChat([start, { runId: R, type: 'text', text: 'half' }, { runId: R, type: 'tool_call', id: 'c1', name: 'draw_grid', args: {} }])
+    expect(s).toMatchObject({ running: false, step: null, lastReason: 'aborted' })
+    expect(s.items.map((i) => i.kind)).toEqual(['user', 'assistant', 'tool', 'info'])
+    expect(s.items[2]).toMatchObject({ status: 'error' })
+  })
+
   it('start adds the user message and marks the run', () => {
     const s = play([start])
     expect(s).toMatchObject({ running: true, runId: R })

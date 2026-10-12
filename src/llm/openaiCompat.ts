@@ -27,6 +27,8 @@ export interface LocalModelInfo {
   tools?: boolean
   /** From `type: 'vlm'`. */
   vision?: boolean
+  /** False for an embedding model (`type: 'embeddings'`) and a speculative-decoding draft model (`arch: 'dflash'`). */
+  chat?: boolean
 }
 
 const LOAD_TIMEOUT_MS = 10 * 60_000
@@ -223,10 +225,14 @@ export class OpenAiCompatClient implements ProviderClient {
     const root = this.base.replace(/\/v1$/, '')
     const res = await this.f(`${root}/api/v1/models`, { signal: AbortSignal.timeout(10_000) })
     if (!res.ok) return // not LM Studio's API: send the request as it is
-    const json = (await res.json()) as { models?: { key: string; type?: string; loaded_instances?: { id: string }[] }[] }
+    const json = (await res.json()) as { models?: { key: string; type?: string; loaded_instances?: { id: string; config?: { context_length?: unknown } }[] }[] }
     const m = json.models?.find((x) => x.key === model || x.loaded_instances?.some((i) => i.id === model))
     if (!m) throw new ProviderError(`LM Studio has no model "${model}": download it first (lms get ${model})`)
-    if (m.loaded_instances?.length) return
+    const instances = m.loaded_instances ?? []
+    // loaded with at least the context the settings ask for (or LM Studio doesn't say): use it as it is
+    if (instances.some((i) => !(Number(i.config?.context_length) < cfg.context))) return
+    // loaded with a smaller context: unload it and load it again with the one asked for
+    for (const i of instances) await this.unload(root, i.id)
     if (this.opts.lmsPath) {
       const args = ['load', model, '-c', String(cfg.context), '--parallel', String(cfg.parallel), '--ttl', String(cfg.ttlMinutes * 60), '-y']
       await new Promise<void>((resolve, reject) =>
@@ -245,6 +251,24 @@ export class OpenAiCompatClient implements ProviderClient {
     if (!load.ok) throw new ProviderError(`LM Studio could not load ${model}: HTTP ${load.status} ${(await load.text().catch(() => '')).slice(0, 300)}`, load.status)
   }
 
+  private async unload(root: string, instance: string): Promise<void> {
+    if (this.opts.lmsPath) {
+      await new Promise<void>((resolve, reject) =>
+        execFile(this.opts.lmsPath!, ['unload', instance], { timeout: 60_000, windowsHide: true }, (err, _out, stderr) =>
+          err ? reject(new ProviderError(`LM Studio could not unload ${instance}: ${(String(stderr).trim() || err.message).slice(0, 300)}`)) : resolve()
+        )
+      )
+      return
+    }
+    const res = await this.f(`${root}/api/v1/models/unload`, {
+      method: 'POST',
+      headers: headers(this.opts.apiKey),
+      body: JSON.stringify({ instance_id: instance }),
+      signal: AbortSignal.timeout(60_000)
+    })
+    if (!res.ok) throw new ProviderError(`LM Studio could not unload ${instance}: HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`, res.status)
+  }
+
   /** LM Studio only (`GET /api/v0/models`): what it says about each model. Empty for other servers. */
   async localModelInfo(signal?: AbortSignal): Promise<Map<string, LocalModelInfo>> {
     const out = new Map<string, LocalModelInfo>()
@@ -252,13 +276,14 @@ export class OpenAiCompatClient implements ProviderClient {
       const origin = new URL(this.base).origin
       const res = await this.f(`${origin}/api/v0/models`, { headers: headers(this.opts.apiKey), signal: withTimeout(signal, 3000) })
       if (!res.ok) return out
-      const json = (await res.json()) as { data?: { id: string; type?: string; capabilities?: string[]; loaded_context_length?: number }[] }
+      const json = (await res.json()) as { data?: { id: string; type?: string; arch?: string; capabilities?: string[]; loaded_context_length?: number }[] }
       for (const m of json.data ?? []) {
         out.set(m.id, {
           id: m.id,
           loadedContext: m.loaded_context_length,
           tools: Array.isArray(m.capabilities) ? m.capabilities.includes('tool_use') : undefined,
-          vision: m.type ? m.type === 'vlm' : undefined
+          vision: m.type ? m.type === 'vlm' : undefined,
+          chat: m.type !== 'embeddings' && !/dflash|draft/i.test(m.arch ?? '')
         })
       }
     } catch {

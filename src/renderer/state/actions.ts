@@ -33,8 +33,9 @@ import {
   getBuiltinPalette,
   serializeProject
 } from '../../core'
+import { EditorSession } from '../../tools/session'
 import { decodeText, readFile, resolveProjectPath, writeFile } from '../lib/files'
-import { session } from './session'
+import { session, workspace } from './session'
 import { useUi } from './ui'
 
 function message(e: unknown): string {
@@ -170,14 +171,73 @@ export function remapDocument(): void {
   exec((d) => createRemapToPaletteCommand(d, {}))
 }
 
+// ---------------------------------------------------------------- tabs
+
+/** Keeps the active tab's view for when it is shown again. */
+function stashActiveTab(): void {
+  workspace.active.viewport = useUi.getState().viewport
+}
+
+/** Puts the active tab's path and view into the UI state. */
+function showActiveTab(): void {
+  const tab = workspace.active
+  useUi.getState().set({ projectPath: tab.projectPath, playing: false, selectedTagId: '', ...(tab.viewport ? { viewport: tab.viewport } : {}) })
+}
+
+export function switchTab(id: string): void {
+  if (id === workspace.activeId) return
+  attempt(() => {
+    stashActiveTab()
+    workspace.activate(id)
+    showActiveTab()
+  })
+}
+
+/** Ctrl+Tab / Ctrl+Shift+Tab. */
+export function cycleTab(dir: 1 | -1): void {
+  attempt(() => {
+    stashActiveTab()
+    workspace.cycle(dir)
+    showActiveTab()
+  })
+}
+
+/** Closes a tab; one with unsaved changes asks first. */
+export function closeTab(id: string, confirm: (message: string) => boolean = (m) => window.confirm(m)): void {
+  const tab = workspace.find(id)
+  if (!tab) return
+  if (workspace.isDirty(tab) && !confirm(`${tab.session.doc.name} has unsaved changes. Close it anyway?`)) return
+  attempt(() => {
+    const wasActive = id === workspace.activeId
+    workspace.close(id)
+    if (wasActive) showActiveTab()
+  })
+}
+
+/**
+ * Shows `doc` in a new tab, or in the active tab when `reuse` says so (an untitled tab nobody drew in).
+ * The new tab gets its own undo history.
+ */
+function openInTab(doc: Document, path: string | null, label: string, reuse: boolean): void {
+  if (reuse) {
+    session.replaceDocument(doc, { history: 'clear', label })
+    workspace.markSaved(path)
+  } else {
+    workspace.assertCanLeave()
+    stashActiveTab()
+    workspace.add(new EditorSession(doc), path)
+  }
+  showActiveTab()
+}
+
 // ---------------------------------------------------------------- document
 
+/** A new document in a new tab (or in the first, untouched tab). */
 export function newDocument(opts: { name: string; width: number; height: number; paletteId?: string }): boolean {
   return attempt(() => {
     const palette = opts.paletteId ? getBuiltinPalette(opts.paletteId) : undefined
     const doc = createDocument({ width: opts.width, height: opts.height, name: opts.name || 'Untitled', palette })
-    session.replaceDocument(doc, { history: 'clear', label: 'New document' })
-    useUi.getState().set({ projectPath: null, playing: false })
+    openInTab(doc, null, 'New document', workspace.isPristine())
     useUi.getState().setStatus(`New ${opts.width}x${opts.height} document`)
   })
 }
@@ -186,12 +246,23 @@ export function resizeCanvas(width: number, height: number, anchor: Anchor): boo
   return exec((d) => createResizeCanvasCommand(d, width, height, anchor))
 }
 
-/** Load a .pxs project from text. The undo history is cleared (the previous document is not recoverable). */
+/**
+ * Opens a .pxs project from text in a new tab (an untitled tab without unsaved changes is reused).
+ * A file that is open already is shown instead of being opened twice.
+ */
 export function openProjectText(text: string, path: string | null): boolean {
   return attempt(() => {
+    const open = path ? workspace.findByPath(path) : undefined
+    if (open) {
+      stashActiveTab()
+      workspace.activate(open.id)
+      showActiveTab()
+      useUi.getState().setStatus(`${open.session.doc.name} is open already`)
+      return
+    }
     const doc = deserializeProject(text)
-    session.replaceDocument(doc, { history: 'clear', label: 'Open project' })
-    useUi.getState().set({ projectPath: path, playing: false })
+    const active = workspace.active
+    openInTab(doc, path, 'Open project', active.projectPath === null && !workspace.isDirty(active))
     useUi.getState().setStatus(`Opened ${doc.name}`)
   })
 }
@@ -209,13 +280,19 @@ export async function openProjectFromPath(nameOrPath: string): Promise<boolean> 
 export async function saveProject(nameOrPath?: string): Promise<boolean> {
   const r = await attemptAsync(async () => {
     const ui = useUi.getState()
-    let path = nameOrPath ? undefined : (ui.projectPath ?? undefined)
+    // the tab and its contents as they are now: switching tabs while the file is written doesn't change what is saved where
+    const tab = workspace.active
+    const data = serializeProject(tab.session.doc, { pretty: false })
+    const edits = tab.edits
+    let path = nameOrPath ? undefined : (tab.projectPath ?? undefined)
     if (!path) {
-      const base = (nameOrPath || session.doc.name || 'Untitled').trim()
+      const base = (nameOrPath || tab.session.doc.name || 'Untitled').trim()
       path = await resolveProjectPath(/\.pxs$/i.test(base) ? base : `${base}.pxs`)
     }
-    await writeFile(path, serializeProject(session.doc, { pretty: false }))
-    ui.set({ projectPath: path })
+    await writeFile(path, data)
+    workspace.markSaved(path, tab)
+    tab.savedEdits = edits
+    if (workspace.activeId === tab.id) ui.set({ projectPath: path })
     ui.setStatus(`Saved ${path}`)
     return true
   })

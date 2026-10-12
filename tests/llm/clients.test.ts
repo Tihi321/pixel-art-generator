@@ -334,6 +334,38 @@ describe('HTTP clients against fake servers', () => {
     await expect(collect(c.chat({ model: 'missing', messages: [] }))).rejects.toMatchObject({ retryable: false, message: expect.stringMatching(/LM Studio has no model "missing": download it first/) })
   })
 
+  it('LM Studio: a model loaded with a smaller context than the settings is unloaded and loaded again', async () => {
+    const instances = new Map<string, number>([['small', 32768], ['big', 131072]])
+    const calls: string[] = []
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      const u = String(url).replace('http://lm.test', '')
+      if (init?.method === 'POST' && u.startsWith('/api/')) calls.push(`${u} ${String(init.body)}`)
+      if (u === '/api/v1/models') {
+        return new Response(
+          JSON.stringify({
+            models: ['small', 'big'].map((key) => ({ key, type: 'llm', loaded_instances: instances.has(key) ? [{ id: key, config: { context_length: instances.get(key) } }] : [] }))
+          })
+        )
+      }
+      if (u === '/api/v1/models/unload') {
+        instances.delete(JSON.parse(String(init!.body)).instance_id)
+        return new Response('{}')
+      }
+      if (u === '/api/v1/models/load') {
+        const b = JSON.parse(String(init!.body))
+        instances.set(b.model, b.context_length)
+        return new Response('{}')
+      }
+      return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+    }) as unknown as typeof fetch
+    const c = new OpenAiCompatClient({ id: 'lm', baseUrl: 'http://lm.test/v1', fetchImpl, loadConfig: () => ({ parallel: 1, context: 131072, ttlMinutes: 60 }) })
+    await collect(c.chat({ model: 'big', messages: [] }))
+    expect(calls).toEqual([])
+    await collect(c.chat({ model: 'small', messages: [] }))
+    expect(calls).toEqual(['/api/v1/models/unload {"instance_id":"small"}', '/api/v1/models/load {"model":"small","context_length":131072,"parallel":1}'])
+    expect(instances.get('small')).toBe(131072)
+  })
+
   it('Anthropic: reads text deltas and usage including cache reads; sends tools and mapped messages', async () => {
     handler = (_u, res) =>
       sse(res, [

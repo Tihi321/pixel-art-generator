@@ -10,6 +10,7 @@ import { OptionsBar } from './components/OptionsBar'
 import { PalettePanel } from './components/PalettePanel'
 import { SaveAssetDialog } from './components/SaveAssetDialog'
 import { SettingsDialog } from './components/SettingsDialog'
+import { TabBar } from './components/TabBar'
 import { Timeline } from './components/Timeline'
 import { Toolbar } from './components/Toolbar'
 import { usePlayback } from './hooks/usePlayback'
@@ -36,6 +37,9 @@ export function App() {
       <aside className="region toolbar" data-testid="toolbar">
         <Toolbar />
       </aside>
+      <div className="region tabs">
+        <TabBar />
+      </div>
       <main className="region canvas" data-testid="canvas">
         <CanvasView />
       </main>

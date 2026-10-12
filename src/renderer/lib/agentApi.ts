@@ -1,7 +1,7 @@
 // Typed wrappers over window.pixelStudio for the agent, the LLM settings and the MCP settings.
 // Every call tolerates a missing handler (the main side may not have registered it): it rejects, and callers show a message.
 
-import { AGENT_IPC, LLM_IPC, type AgentSendResponse, type AgentState, type AgentUiEvent, type LlmOverview } from '../../shared/agent'
+import { AGENT_IPC, LLM_IPC, type AgentSendResponse, type AgentState, type AgentUiEvent, type ChatSummary, type LlmOverview, type OpenedChat } from '../../shared/agent'
 import { MCP_IPC, type McpSettings, type McpState } from '../../shared/mcp'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -14,6 +14,9 @@ export const agentApi = {
   stop: () => invoke<void>(AGENT_IPC.stop),
   reset: () => invoke<AgentState>(AGENT_IPC.reset),
   getState: () => invoke<AgentState>(AGENT_IPC.getState),
+  listChats: () => invoke<ChatSummary[]>(AGENT_IPC.listChats),
+  openChat: (id: string) => invoke<OpenedChat>(AGENT_IPC.openChat, id),
+  deleteChat: (id: string) => invoke<AgentState>(AGENT_IPC.deleteChat, id),
   onEvent: (cb: (ev: AgentUiEvent) => void): (() => void) => (window.pixelStudio ? window.pixelStudio.on(AGENT_IPC.event, (ev) => cb(ev as AgentUiEvent)) : () => undefined)
 }
 
@@ -23,6 +26,8 @@ export const llmApi = {
   setKey: (providerId: string, key: string) => invoke<LlmOverview>(LLM_IPC.setKey, providerId, key),
   deleteKey: (providerId: string) => invoke<LlmOverview>(LLM_IPC.deleteKey, providerId),
   reload: () => invoke<LlmOverview>(LLM_IPC.reload),
+  refreshModels: () => invoke<LlmOverview>(LLM_IPC.refreshModels),
+  setContextSize: (tokens: number | null) => invoke<LlmOverview>(LLM_IPC.setContextSize, tokens),
   openConfigFolder: () => invoke<string>(LLM_IPC.openConfigFolder)
 }
 

@@ -61,6 +61,28 @@ function KeyRow({ provider, onChange, busy }: { provider: LlmProviderInfo; onCha
   )
 }
 
+function ContextSizeRow({ overview, busy, run }: { overview: LlmOverview; busy: boolean; run: (p: Promise<LlmOverview>) => void }) {
+  const loaders = overview.providers.filter((p) => p.loadsModels).map((p) => p.id)
+  const servers = overview.providers.filter((p) => p.serverContext)
+  return (
+    <div className="form" data-testid="llm-context">
+      <label>
+        <span>Context size (tokens)</span>
+        <span className="row-buttons">
+          <NumberField value={overview.contextSize} min={2048} max={1048576} width={100} onCommit={(n) => run(llmApi.setContextSize(n))} testId="llm-context-size" />
+          <button disabled={busy || !overview.contextSizeSet} title="Use lmstudio_context and load_context from providers.md again" onClick={() => run(llmApi.setContextSize(null))}>
+            From providers.md
+          </button>
+        </span>
+      </label>
+      <div className="hint">
+        {loaders.length > 0 ? `${loaders.join(', ')} loads its models with this context; a model loaded with less is loaded again on the next message.` : 'No provider here loads its models.'}
+        {servers.map((p) => ` ${p.id} runs with ${p.serverContext} tokens (set in its own setup).`).join('')}
+      </div>
+    </div>
+  )
+}
+
 function ProvidersTab() {
   const setOverview = useChat((s) => s.setOverview)
   const [overview, setLocal] = useState<LlmOverview | null>(null)
@@ -97,6 +119,7 @@ function ProvidersTab() {
         </button>
       </div>
       {overview?.configDir && <div className="hint">Edit providers.md and roles.md in {overview.configDir}</div>}
+      {overview && overview.contextSize > 0 && <ContextSizeRow overview={overview} busy={busy} run={run} />}
       {(error || overview?.error) && <div className="error" data-testid="llm-error">{error || overview?.error}</div>}
       {!overview && !error && <div className="hint">Loading providers...</div>}
       {overview?.providers.map((p) => (

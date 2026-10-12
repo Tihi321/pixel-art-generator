@@ -10,8 +10,9 @@
 import { randomUUID } from 'node:crypto'
 import { runAgent } from '../llm'
 import type { AgentEvent, AgentModelSource, AgentResult, ChatMessage, ToolHost as LlmToolHost, ToolResult as LlmToolResult } from '../llm'
-import { AGENT_TURN_LABEL_PREFIX, type AgentSendResponse, type AgentState, type AgentUiEvent, type AgentUsage } from '../shared/agent'
+import { AGENT_TURN_LABEL_PREFIX, type AgentSendResponse, type AgentState, type AgentUiEvent, type AgentUsage, type ChatSummary, type OpenedChat } from '../shared/agent'
 import type { ToolHost, ToolResult, TurnToolHost } from '../shared/tools'
+import type { ChatHistoryStore } from './chatHistory'
 
 export const MAX_AGENT_STEPS = 25
 
@@ -64,6 +65,13 @@ export function turnLabel(prompt: string): string {
   return `${AGENT_TURN_LABEL_PREFIX}${short || 'turn'}`
 }
 
+/** Keeps an event for the saved chat; streamed text of one answer is kept as one event. */
+function record(events: AgentUiEvent[], ev: AgentUiEvent): void {
+  const last = events[events.length - 1]
+  if (ev.type === 'text' && last?.type === 'text' && last.runId === ev.runId) events[events.length - 1] = { ...last, text: last.text + ev.text }
+  else events.push(ev)
+}
+
 function textOf(result: ToolResult | LlmToolResult): string {
   return result.content.map((c) => (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
 }
@@ -96,22 +104,40 @@ export interface AgentRunnerOptions {
   maxSteps?: number
   /** Replace the loop (tests). */
   run?: typeof runAgent
+  /** Where conversations are saved after every turn. None: nothing is saved. */
+  chats?: ChatHistoryStore
+}
+
+/** A conversation: what the model sees and what the Chat panel was sent. */
+interface Conversation {
+  id: string
+  title: string
+  createdAt: number
+  history: ChatMessage[]
+  events: AgentUiEvent[]
+}
+
+const newConversation = (): Conversation => ({ id: randomUUID(), title: '', createdAt: Date.now(), history: [], events: [] })
+
+/** The chat's title: the first words of its first message. */
+export function chatTitle(text: string): string {
+  const t = text.trim().replace(/\s+/g, ' ')
+  return t.length > 60 ? `${t.slice(0, 59)}…` : t || 'Chat'
 }
 
 export class AgentRunner {
-  private history: ChatMessage[] = []
+  private convo = newConversation()
   private current: { runId: string; abort: AbortController; done: Promise<void> } | null = null
-  private resetAfterRun = false
 
   constructor(private readonly opts: AgentRunnerOptions) {}
 
   getState(): AgentState {
-    return { running: this.current !== null, runId: this.current?.runId ?? null, messageCount: this.history.length }
+    return { running: this.current !== null, runId: this.current?.runId ?? null, messageCount: this.convo.history.length, chatId: this.convo.id }
   }
 
   /** The conversation kept between turns (a copy). */
   messages(): ChatMessage[] {
-    return [...this.history]
+    return [...this.convo.history]
   }
 
   /** Starts a run and returns right away; events stream through `emit`. Only one run at a time. */
@@ -121,7 +147,7 @@ export class AgentRunner {
     if (this.current) return { ok: false, error: 'The agent is still working on the previous message. Stop it or wait.' }
     const runId = randomUUID()
     const abort = new AbortController()
-    const done = this.execute(runId, text, req.modelRef, abort).catch(() => undefined)
+    const done = this.execute(this.convo, runId, text, req.modelRef, abort).catch(() => undefined)
     this.current = { runId, abort, done }
     return { ok: true, runId }
   }
@@ -131,12 +157,34 @@ export class AgentRunner {
     this.current?.abort.abort()
   }
 
-  /** Starts a new conversation. A running turn is aborted first; its messages are dropped when it ends. */
+  /** Starts a new conversation. A running turn is aborted first; it ends in the conversation it started in (and is saved there). */
   reset(): AgentState {
-    if (this.current) {
-      this.resetAfterRun = true
-      this.current.abort.abort()
-    } else this.history = []
+    this.current?.abort.abort()
+    this.convo = newConversation()
+    return this.getState()
+  }
+
+  /** The saved chats, newest first. */
+  async listChats(): Promise<ChatSummary[]> {
+    return this.opts.chats ? this.opts.chats.list() : []
+  }
+
+  /** Continues a saved chat: it becomes the current conversation. Returns its events for the Chat panel to replay. */
+  async openChat(id: string): Promise<OpenedChat> {
+    if (!this.opts.chats) throw new Error('Chats are not saved here.')
+    if (this.current) throw new Error('The agent is still working. Stop it or wait, then open the chat.')
+    const chat = await this.opts.chats.load(id)
+    this.convo = { id: chat.id, title: chat.title, createdAt: chat.createdAt, history: chat.messages, events: chat.events }
+    return { state: this.getState(), events: chat.events }
+  }
+
+  /** Deletes a saved chat. Deleting the current conversation starts a new one. */
+  async deleteChat(id: string): Promise<AgentState> {
+    if (id === this.convo.id) {
+      if (this.current) throw new Error('The agent is working in this chat. Stop it first.')
+      this.convo = newConversation()
+    }
+    await this.opts.chats?.delete(id)
     return this.getState()
   }
 
@@ -145,14 +193,23 @@ export class AgentRunner {
     while (this.current) await this.current.done
   }
 
-  private async execute(runId: string, text: string, modelRef: string | null | undefined, abort: AbortController): Promise<void> {
+  private async execute(convo: Conversation, runId: string, text: string, modelRef: string | null | undefined, abort: AbortController): Promise<void> {
     const { bridge, emit } = this.opts
-    const send = (ev: UiBody): void => {
+    if (!convo.title) convo.title = chatTitle(text)
+    const deliver = (ev: AgentUiEvent): void => {
       try {
-        emit({ ...ev, runId } as AgentUiEvent)
+        emit(ev)
       } catch {
         /* a listener must not break the run */
       }
+    }
+    // `done` goes out after the chat is saved, so the history the panel asks for then has this turn
+    let done: AgentUiEvent | null = null
+    const send = (body: UiBody): void => {
+      const ev = { ...body, runId } as AgentUiEvent
+      record(convo.events, ev)
+      if (ev.type === 'done') done = ev
+      else deliver(ev)
     }
     const label = turnLabel(text)
     send({ type: 'start', label, text })
@@ -186,10 +243,10 @@ export class AgentRunner {
       const result: AgentResult = await (this.opts.run ?? runAgent)({
         ...model.source,
         system,
-        history: this.history,
+        history: convo.history,
         // Vision models see the style reference images once, with the first message of a conversation.
         userMessage:
-          model.vision && styleImages.length > 0 && this.history.length === 0
+          model.vision && styleImages.length > 0 && convo.history.length === 0
             ? [{ type: 'text', text }, { type: 'text', text: 'Preview images of the style reference assets (same order as in the style context):' }, ...styleImages]
             : text,
         host,
@@ -205,7 +262,7 @@ export class AgentRunner {
         endError = `Could not close the agent turn: ${err instanceof Error ? err.message : String(err)}`
       }
       turnOpen = false
-      if (result.reason !== 'error') this.history = result.messages
+      if (result.reason !== 'error') convo.history = result.messages
       const error = result.error?.message ?? endError
       send({
         type: 'done',
@@ -222,10 +279,17 @@ export class AgentRunner {
       fail(err instanceof Error ? err.message : String(err))
     } finally {
       this.current = null
-      if (this.resetAfterRun) {
-        this.history = []
-        this.resetAfterRun = false
-      }
+      await this.save(convo)
+      if (done) deliver(done)
+    }
+  }
+
+  private async save(convo: Conversation): Promise<void> {
+    if (!this.opts.chats || convo.events.length === 0) return
+    try {
+      await this.opts.chats.save({ version: 1, id: convo.id, title: convo.title, createdAt: convo.createdAt, updatedAt: Date.now(), messages: convo.history, events: convo.events })
+    } catch (err) {
+      console.warn(`[agent] could not save the chat: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

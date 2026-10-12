@@ -43,7 +43,7 @@ describe('LlmService', () => {
     const sonnet = o.models.find((m) => m.ref === 'anthropic/claude-sonnet-5-5')!
     expect(sonnet).toMatchObject({ tools: true, vision: true, local: false, available: true })
     expect(o.models.find((m) => m.ref === 'lmstudio/google/gemma-4-e4b')).toMatchObject({ tools: false, vision: true, local: true })
-    expect(o.defaultModel).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
+    expect(o.defaultModel).toBe('lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp')
     expect(JSON.stringify(o)).not.toMatch(/secret/)
   })
 
@@ -73,7 +73,20 @@ describe('LlmService', () => {
     // an explicit ref wins over the saved one
     expect(await svc.resolveModel('lmstudio/google/gemma-4-e4b')).toMatchObject({ vision: true, ref: 'lmstudio/google/gemma-4-e4b' })
     await svc.setSelectedModel(null)
-    expect(await svc.resolveModel()).toMatchObject({ vision: false, ref: 'lmstudio/nail-qwen3.6-35b-a3b-mtp' })
+    expect(await svc.resolveModel()).toMatchObject({ vision: true, ref: 'lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp' })
+  })
+
+  it('the context size from Settings is saved, applied to LM Studio loads and survives a restart', async () => {
+    const { ops } = fakeKeys()
+    const svc = make(ops)
+    expect(await svc.overview()).toMatchObject({ contextSize: 131072, contextSizeSet: false })
+    expect((await svc.overview()).providers.find((p) => p.id === 'lmstudio')).toMatchObject({ loadsModels: true })
+    expect(await svc.setContextSize(65536)).toMatchObject({ contextSize: 65536, contextSizeSet: true })
+    expect((await svc.get()).registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp').context).toBe(65536)
+    await expect(svc.setContextSize(100)).rejects.toThrow(/2048/)
+    const again = make(ops)
+    expect((await again.get()).registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp').context).toBe(65536)
+    expect(await again.setContextSize(null)).toMatchObject({ contextSize: 131072, contextSizeSet: false })
   })
 
   it('reload keeps working and reports an invalid config instead of throwing', async () => {
@@ -91,11 +104,15 @@ describe('appSettings', () => {
   it('reads defaults from a missing or broken file', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ps-app-'))
     try {
-      expect(await readAppSettings(dir)).toEqual({ selectedModel: null })
+      expect(await readAppSettings(dir)).toEqual({ selectedModel: null, contextSize: null })
       await writeAppSettings(dir, { selectedModel: 'a/b' })
       expect((await readAppSettings(dir)).selectedModel).toBe('a/b')
+      await writeAppSettings(dir, { contextSize: 65536 })
+      expect(await readAppSettings(dir)).toEqual({ selectedModel: 'a/b', contextSize: 65536 })
+      await writeFile(path.join(dir, 'app.json'), JSON.stringify({ contextSize: 100 }), 'utf8')
+      expect((await readAppSettings(dir)).contextSize).toBeNull()
       await writeFile(path.join(dir, 'app.json'), '{not json', 'utf8')
-      expect(await readAppSettings(dir)).toEqual({ selectedModel: null })
+      expect(await readAppSettings(dir)).toEqual({ selectedModel: null, contextSize: null })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

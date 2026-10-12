@@ -1,5 +1,5 @@
 // App-level settings that are not provider config: `~/PixelStudio/config/app.json`.
-// Today: the model chosen for the chat. Unknown keys are kept, a broken file reads as defaults.
+// Today: the model chosen for the chat and the context size. Unknown keys are kept, a broken file reads as defaults.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -7,16 +7,26 @@ import { join } from 'node:path'
 export interface AppSettings {
   /** `provider/model` the chat uses; null for the role's first available model. */
   selectedModel: string | null
+  /** Context window (tokens) LM Studio loads models with; null: `lmstudio_context` / `load_context` in providers.md. */
+  contextSize: number | null
 }
 
 export const APP_SETTINGS_FILE = 'app.json'
 
-const DEFAULTS: AppSettings = { selectedModel: null }
+export const CONTEXT_SIZE_MIN = 2048
+export const CONTEXT_SIZE_MAX = 1_048_576
+
+const DEFAULTS: AppSettings = { selectedModel: null, contextSize: null }
 
 export async function readAppSettings(configDir: string): Promise<AppSettings> {
   try {
     const raw = JSON.parse(await readFile(join(configDir, APP_SETTINGS_FILE), 'utf8')) as Record<string, unknown>
-    return { ...DEFAULTS, selectedModel: typeof raw.selectedModel === 'string' && raw.selectedModel ? raw.selectedModel : null }
+    const ctx = raw.contextSize
+    return {
+      ...DEFAULTS,
+      selectedModel: typeof raw.selectedModel === 'string' && raw.selectedModel ? raw.selectedModel : null,
+      contextSize: typeof ctx === 'number' && Number.isInteger(ctx) && ctx >= CONTEXT_SIZE_MIN && ctx <= CONTEXT_SIZE_MAX ? ctx : null
+    }
   } catch {
     return { ...DEFAULTS }
   }

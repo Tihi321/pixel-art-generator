@@ -52,7 +52,7 @@ describe('seed config', () => {
     expect(registry.providers.get('ollama')?.available).toBe(false)
 
     const qwen = registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')!
-    expect(qwen).toMatchObject({ tools: true, vision: false, loadContext: 65536 })
+    expect(qwen).toMatchObject({ tools: true, vision: false, loadContext: undefined, context: 131072 })
     expect(registry.getModel('lmstudio/google/gemma-4-e4b')).toMatchObject({ tools: false, vision: true })
     expect(registry.getModel('anthropic/claude-sonnet-5-5')).toMatchObject({ tools: true, vision: true })
     expect(registry.getModel('claude')?.ref).toBe('anthropic/claude-sonnet-5-5')
@@ -63,23 +63,27 @@ describe('seed config', () => {
 
     for (const role of Object.keys(registry.roles.roles)) for (const ref of registry.roleModelRefs(role)) expect(registry.getModel(ref), ref).toBeTruthy()
     expect(registry.roles.roles.artist).toBeTruthy()
-    expect(registry.roleModelRefs('artist')[0]).toBe('lmstudio/nail-qwen3.6-35b-a3b-mtp')
-    // no key: the cloud models are dropped, LM Studio is first
-    expect(router.candidates('artist').map((m) => m.ref)).toEqual(['lmstudio/nail-qwen3.6-35b-a3b-mtp', 'strata/qwen3.8-flash-next'])
+    expect(registry.getModel('lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp')).toMatchObject({ tools: true, vision: true })
+    // the local Qwen 3.8 27B is the only default
+    expect(router.candidates('artist').map((m) => m.ref)).toEqual(['lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp'])
+    expect(router.candidates('palette').map((m) => m.ref)).toEqual(['lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp'])
+    // no key: a picked cloud model is dropped
+    expect(router.candidates('artist', { agentModel: 'cloud' }).map((m) => m.ref)).toEqual(['lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp'])
     expect(router.candidates('artist', { agentModel: 'strata/qwen3.8-flash-next-low' })[0]!.ref).toBe('strata/qwen3.8-flash-next-low')
-    expect(registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp')).toEqual({ parallel: 1, context: 65536, ttlMinutes: 60 })
-    expect(registry.loadConfigFor('lmstudio', 'google/gemma-4-e4b')).toEqual({ parallel: 1, context: 32768, ttlMinutes: 60 })
+    expect(registry.loadConfigFor('lmstudio', 'nail-qwen3.6-35b-a3b-mtp')).toEqual({ parallel: 1, context: 131072, ttlMinutes: 60 })
+    expect(registry.lmContext).toEqual({ effective: 131072, fromConfig: 131072 })
+    // the context size from Settings replaces providers.md's for every LM Studio model, also over a model's own load_context
+    registry.setContextSize(65536)
+    expect(registry.loadConfigFor('lmstudio', 'google/gemma-4-e4b')).toEqual({ parallel: 1, context: 65536, ttlMinutes: 60 })
+    expect(registry.lmContext.effective).toBe(65536)
+    registry.setContextSize(null)
+    expect(registry.loadConfigFor('lmstudio', 'google/gemma-4-e4b').context).toBe(131072)
   })
 
   it('with a key the paid providers are available', async () => {
     const { router } = await createLlm({ configDir: path.join(dir, 'config'), seedDir, keys: () => 'k', discover: false })
-    expect(router.candidates('artist').map((m) => m.ref)).toEqual([
-      'lmstudio/nail-qwen3.6-35b-a3b-mtp',
-      'strata/qwen3.8-flash-next',
-      'deepseek/deepseek-flash',
-      'anthropic/claude-sonnet-5-5'
-    ])
-    expect(router.candidates('artist', { requireTools: true })).toHaveLength(4)
+    expect(router.candidates('artist', { agentModel: 'cloud' }).map((m) => m.ref)).toEqual(['deepseek/deepseek-flash', 'lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp'])
+    expect(router.candidates('artist', { agentModel: 'claude', requireTools: true })).toHaveLength(2)
   })
 })
 
@@ -139,6 +143,48 @@ describe('discovery', () => {
     // a reload keeps what was found
     await registry.load()
     expect(registry.getModel('lm/found-a')).toBeTruthy()
+  })
+
+  it('lists only the installed models once the server answers: configured ones it lacks, embedding and draft models are left out', async () => {
+    let installed = [{ id: 'kept', type: 'llm' }, { id: 'new-one', type: 'vlm' }, { id: 'text-embedding-x', type: 'embeddings' }, { id: 'qwen-dflash', type: 'llm', arch: 'dflash' }]
+    let loaded = [{ id: 'kept' }]
+    let up = false
+    const fetchImpl = (async (url: string) => {
+      if (!up) throw new TypeError('fetch failed')
+      const u = String(url)
+      if (u.includes('/api/v0/models')) return new Response(JSON.stringify({ data: installed }))
+      // LM Studio without JIT loading lists only the loaded models here
+      if (u.endsWith('/v1/models')) return new Response(JSON.stringify({ data: loaded }))
+      return new Response('', { status: 404 })
+    }) as unknown as typeof fetch
+    const registry = await registryFor(
+      '  - id: lm\n    kind: openai-compat\n    local: true\n    base_url: http://lm.test/v1\n    discover: true\n    models:\n      - id: kept\n        tools: true\n        load_context: 65536\n      - id: gone\n        tools: true',
+      '  r:\n    models: [lm/gone, lm/kept]',
+      undefined,
+      { fetchImpl }
+    )
+    const lmRefs = () => registry.listModels().map((m) => m.ref).sort()
+    // the server is down: the configured list stays
+    expect((await registry.discover())[0]?.error).toBeTruthy()
+    expect(lmRefs()).toEqual(['lm/gone', 'lm/kept'])
+
+    up = true
+    expect(await registry.discover()).toEqual([{ provider: 'lm', found: 2 }])
+    expect(lmRefs()).toEqual(['lm/kept', 'lm/new-one'])
+    expect(registry.getModel('lm/kept')).toMatchObject({ discovered: false, loadContext: 65536 })
+    registry.setContextSize(100_000)
+    expect(registry.loadConfigFor('lm', 'kept').context).toBe(100_000)
+    expect(registry.getModel('lm/new-one')).toMatchObject({ discovered: true, vision: true })
+    // a reload of the config files doesn't bring the missing one back
+    await registry.load()
+    expect(lmRefs()).toEqual(['lm/kept', 'lm/new-one'])
+
+    // a configured model installed later gets its settings back; one uninstalled goes away
+    installed = [{ id: 'gone', type: 'llm' }]
+    loaded = []
+    await registry.discover()
+    expect(lmRefs()).toEqual(['lm/gone'])
+    expect(registry.getModel('lm/gone')).toMatchObject({ discovered: false, tools: true })
   })
 })
 

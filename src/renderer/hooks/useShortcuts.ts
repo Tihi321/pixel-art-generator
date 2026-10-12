@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { getToolController } from '../components/CanvasView'
 import { shortcutFor } from '../lib/keys'
 import { fitViewport, stepZoom, zoomAt } from '../lib/viewport'
-import { redo, undo } from '../state/actions'
+import { cycleTab, redo, undo } from '../state/actions'
 import { input } from '../state/input'
 import { session } from '../state/session'
 import { useUi } from '../state/ui'
@@ -28,8 +28,13 @@ export function useShortcuts(): void {
         useUi.getState().openDialog(useUi.getState().dialog ? null : 'settings')
         return
       }
-      if (isTyping(e.target)) return
       if (useUi.getState().dialog) return
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
+        e.preventDefault()
+        cycleTab(e.shiftKey ? -1 : 1)
+        return
+      }
+      if (isTyping(e.target)) return
       if (e.code === 'Space') {
         input.space = true
         e.preventDefault()

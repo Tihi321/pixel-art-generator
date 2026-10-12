@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MockProvider } from '../../src/llm/mock'
 import { collect } from '../../src/llm/types'
 import type { ChatFn, ChatMessage } from '../../src/llm/types'
-import { AgentRunner, isDrawingTool, turnLabel, withAutoPreview } from '../../src/main/agent'
+import { AgentRunner, chatTitle, isDrawingTool, turnLabel, withAutoPreview } from '../../src/main/agent'
+import { ChatHistoryStore } from '../../src/main/chatHistory'
+import { replayChat } from '../../src/renderer/state/chatReducer'
 import type { AgentUiEvent } from '../../src/shared/agent'
 import type { ToolDef, ToolResult, TurnToolHost } from '../../src/shared/tools'
 
@@ -243,6 +248,96 @@ describe('AgentRunner', () => {
 
   it('rejects an empty message', () => {
     expect(make().send({ text: '   ' })).toMatchObject({ ok: false })
+  })
+})
+
+describe('chat history', () => {
+  let dir: string
+  let mock: MockProvider
+  let events: AgentUiEvent[]
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'ps-chats-'))
+    mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    events = []
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+  const make = (chats: ChatHistoryStore) =>
+    new AgentRunner({
+      bridge: makeBridge(),
+      guide: 'G',
+      emit: (e) => events.push(e),
+      resolveModel: async () => ({ source: { chat: mockChat(mock), capabilities: { tools: true, vision: false } }, vision: false }),
+      chats
+    })
+
+  it('saves a chat after every turn, lists it, and continues it after a restart', async () => {
+    mock.script([{ text: 'first answer', chunks: 4 }, 'second answer', 'third answer'])
+    const runner = make(new ChatHistoryStore(dir))
+    expect(await runner.listChats()).toEqual([])
+    const chatId = runner.getState().chatId
+    runner.send({ text: 'draw a red  tree please' })
+    await runner.whenIdle()
+    runner.send({ text: 'make it bigger' })
+    await runner.whenIdle()
+    expect(await runner.listChats()).toMatchObject([{ id: chatId, title: 'draw a red tree please', turns: 2 }])
+    // the streamed answer is kept as one text event, and `done` reached the panel after the save
+    const saved = await new ChatHistoryStore(dir).load(chatId)
+    expect(saved.events.filter((e) => e.type === 'text').map((e) => (e as { text: string }).text)).toEqual(['first answer', 'second answer'])
+    expect(events[events.length - 1]).toMatchObject({ type: 'done' })
+
+    // a new runner (the app restarted) opens it: same transcript, and the model gets the earlier messages
+    const again = make(new ChatHistoryStore(dir))
+    expect(again.getState().chatId).not.toBe(chatId)
+    const opened = await again.openChat(chatId)
+    expect(opened.state).toMatchObject({ chatId, messageCount: 4 })
+    const shown = replayChat(opened.events)
+    expect(shown.items.map((i) => i.kind)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(shown.running).toBe(false)
+    again.send({ text: 'and add apples' })
+    await again.whenIdle()
+    expect(mock.requests[2]!.messages.slice(1).map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user'])
+    expect((await again.listChats())[0]).toMatchObject({ id: chatId, turns: 3 })
+  })
+
+  it('a new chat is saved separately; deleting the current chat starts a new one', async () => {
+    mock.script(['a', 'b'])
+    const chats = new ChatHistoryStore(dir)
+    const runner = make(chats)
+    runner.send({ text: 'one' })
+    await runner.whenIdle()
+    const first = runner.getState().chatId
+    runner.reset()
+    expect(await readdir(dir)).toHaveLength(1) // an empty conversation is not saved
+    runner.send({ text: 'two' })
+    await runner.whenIdle()
+    const second = runner.getState().chatId
+    expect((await runner.listChats()).map((c) => c.id)).toEqual([second, first])
+    const st = await runner.deleteChat(second)
+    expect(st.chatId).not.toBe(second)
+    expect(st.messageCount).toBe(0)
+    expect((await runner.listChats()).map((c) => c.id)).toEqual([first])
+    await expect(runner.openChat('../evil')).rejects.toThrow(/Not a chat id/)
+  })
+
+  it('skips files that are not chats, and refuses to open one while a turn runs', async () => {
+    await writeFile(path.join(dir, 'junk.json'), '{"x":1}', 'utf8')
+    mock.script(['a', { text: 'y'.repeat(50), chunks: 50, chunkDelayMs: 10 }])
+    const runner = make(new ChatHistoryStore(dir))
+    runner.send({ text: 'one' })
+    await runner.whenIdle()
+    const id = runner.getState().chatId
+    expect((await runner.listChats()).map((c) => c.id)).toEqual([id])
+    runner.send({ text: 'two' })
+    await expect(runner.openChat(id)).rejects.toThrow(/still working/)
+    await expect(runner.deleteChat(id)).rejects.toThrow(/Stop it first/)
+    runner.stop()
+    await runner.whenIdle()
+  })
+
+  it('a title is the first words of the first message', () => {
+    expect(chatTitle('  a\n tree ')).toBe('a tree')
+    expect(chatTitle('x'.repeat(80))).toHaveLength(60)
+    expect(chatTitle('')).toBe('Chat')
   })
 })
 

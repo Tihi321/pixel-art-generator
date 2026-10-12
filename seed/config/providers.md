@@ -2,8 +2,9 @@
 kind: providers
 # LM Studio loading: when a request goes to an LM Studio model that isn't loaded, Pixel Studio loads it with these settings.
 # A model entry can override the context and parallel count with load_context and load_parallel.
+# The context size in Settings (Providers) overrides both contexts for every LM Studio model.
 lmstudio_parallel: 1
-lmstudio_context: 32768
+lmstudio_context: 131072
 lmstudio_ttl_minutes: 60
 providers:
   - id: lmstudio
@@ -11,14 +12,19 @@ providers:
     local: true
     base_url: http://localhost:1234/v1
     concurrency: auto             # the sum of `parallel` over the loaded chat models, 1 when none is loaded
-    discover: true                # models found with GET /v1/models are added; LM Studio reports tool and vision support for them
+    discover: true                # the list is the installed models (listed ones it lacks are left out); LM Studio reports tool and vision support
     load_models: true             # load a model that isn't loaded yet (lms load, or LM Studio's API when lms isn't installed)
     models:
       - id: nail-qwen3.6-35b-a3b-mtp
         family: qwen
         tools: true
         extra_body: { reasoning_effort: low }
-        load_context: 65536
+        load_parallel: 1
+      - id: ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
+        family: qwen
+        tools: true
+        vision: true
+        extra_body: { reasoning_effort: low }
         load_parallel: 1
       - id: google/gemma-4-e4b
         family: gemma
@@ -197,9 +203,9 @@ A model is written `provider/model`, for example `lmstudio/google/gemma-4-e4b`. 
 - `base_url`, `api_key_env`: where to call and which variable holds the key.
 - `concurrency`: how many requests may run at once. `auto`: as many as the server says it serves (Strata `/status`, LM Studio loaded slots), 1 while the server is down.
 - `rpm`: optional requests per minute.
-- `discover`: ask the provider for its models (`GET /v1/models`) and add the ones not listed here.
+- `discover`: ask the provider for its models (`GET /v1/models`, and LM Studio's own list of downloaded models). When it answers, the provider's list is exactly its installed models: the ones listed here keep their settings, unknown ones are added, listed ones it doesn't have, embedding models and speculative-decoding draft models (LM Studio `arch: dflash`) are left out. The chat's model list asks again each time it opens.
 - `json_schema`: `true` (the default) sends the JSON schema of a structured answer as `response_format`. Set `false` for a server that answers a bad JSON reply with an error.
-- `load_models` (LM Studio): load a model that isn't loaded yet with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes`.
+- `load_models` (LM Studio): load a model that isn't loaded yet with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes`. The context size in Settings replaces `lmstudio_context` and every `load_context`, and a model loaded with a smaller context is loaded again on its next request.
 
 ## Fields of a model
 

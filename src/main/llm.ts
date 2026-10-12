@@ -15,7 +15,7 @@ import {
   type ModelRouter
 } from '../llm'
 import type { KeyStatus, LlmModelInfo, LlmOverview, LlmProviderInfo } from '../shared/agent'
-import { readAppSettings, writeAppSettings } from './appSettings'
+import { CONTEXT_SIZE_MAX, CONTEXT_SIZE_MIN, readAppSettings, writeAppSettings } from './appSettings'
 import { defaultRoot } from './services'
 
 /** The role the chat agent uses in roles.md. */
@@ -83,6 +83,7 @@ function modelInfo(m: ModelInfo): LlmModelInfo {
 
 export class LlmService {
   private loading: Promise<Loaded> | null = null
+  private refreshing: Promise<void> | null = null
   private readonly keys: KeyOps
   readonly configDir: string
   readonly dataDir: string
@@ -101,10 +102,15 @@ export class LlmService {
         seedDir: this.opts.seedDir,
         keys: this.keys.resolve,
         discover: this.opts.discover
-      }).catch((err) => {
-        this.loading = null
-        throw err
       })
+        .then(async (l) => {
+          l.registry.setContextSize((await readAppSettings(this.configDir)).contextSize)
+          return l
+        })
+        .catch((err) => {
+          this.loading = null
+          throw err
+        })
     }
     return this.loading
   }
@@ -117,7 +123,14 @@ export class LlmService {
 
   async overview(extraError?: string): Promise<LlmOverview> {
     const settings = await readAppSettings(this.configDir)
-    const base = { configDir: this.configDir, dataDir: this.dataDir, selectedModel: settings.selectedModel, defaultModel: null as string | null }
+    const base = {
+      configDir: this.configDir,
+      dataDir: this.dataDir,
+      selectedModel: settings.selectedModel,
+      defaultModel: null as string | null,
+      contextSize: settings.contextSize ?? 0,
+      contextSizeSet: settings.contextSize !== null
+    }
     let loaded: Loaded
     try {
       loaded = await this.get()
@@ -135,10 +148,13 @@ export class LlmService {
       available: p.available,
       ...(p.unavailableReason ? { unavailableReason: p.unavailableReason } : {}),
       keyStatus: this.keyStatus(p.apiKeyEnv),
-      models: [...registry.models.values()].filter((m) => m.provider.id === p.id).map((m) => m.ref)
+      models: [...registry.models.values()].filter((m) => m.provider.id === p.id).map((m) => m.ref),
+      ...(p.serverContext ? { serverContext: p.serverContext } : {}),
+      loadsModels: p.loadModels
     }))
     return {
       ...base,
+      contextSize: registry.lmContext.effective,
       defaultModel: router.candidates(AGENT_ROLE)[0]?.ref ?? null,
       providers,
       models: registry.listModels().map(modelInfo),
@@ -148,6 +164,17 @@ export class LlmService {
 
   async setSelectedModel(ref: string | null): Promise<void> {
     await writeAppSettings(this.configDir, { selectedModel: ref })
+  }
+
+  /** Sets the context LM Studio loads models with (null: back to providers.md). A model loaded with less is loaded again on its next request. */
+  async setContextSize(tokens: number | null): Promise<LlmOverview> {
+    if (tokens !== null && !(Number.isInteger(tokens) && tokens >= CONTEXT_SIZE_MIN && tokens <= CONTEXT_SIZE_MAX)) {
+      throw new Error(`The context size must be a whole number from ${CONTEXT_SIZE_MIN} to ${CONTEXT_SIZE_MAX}.`)
+    }
+    await writeAppSettings(this.configDir, { contextSize: tokens })
+    const loaded = await this.get().catch(() => null)
+    loaded?.registry.setContextSize(tokens)
+    return this.overview()
   }
 
   async selectedModel(): Promise<string | null> {
@@ -187,6 +214,23 @@ export class LlmService {
       error = err instanceof Error ? err.message : String(err)
     }
     return this.overview(error)
+  }
+
+  /** Asks the local providers again which models they have, without re-reading the config files. The chat's model list calls this when it opens. */
+  async refreshModels(): Promise<LlmOverview> {
+    if (this.opts.discover !== false) {
+      this.refreshing ??= this.get()
+        .then(async ({ registry }) => {
+          await registry.discover().catch(() => undefined)
+          await registry.syncServerSlots().catch(() => undefined)
+        })
+        .catch(() => undefined) // overview() reports a config error
+        .finally(() => {
+          this.refreshing = null
+        })
+      await this.refreshing
+    }
+    return this.overview()
   }
 
   /** The model source for a run: `modelRef`, else the saved selection, else the role's list. */

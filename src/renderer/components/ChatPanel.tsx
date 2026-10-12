@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { LlmModelInfo } from '../../shared/agent'
 import { useSession } from '../hooks/useSession'
 import { session } from '../state/session'
@@ -54,6 +54,44 @@ function Item({ item }: { item: ChatItem }) {
   }
 }
 
+function when(ms: number): string {
+  const d = new Date(ms)
+  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString()
+}
+
+/** The saved chats: open one to continue it, or delete it. */
+function ChatHistory({ onOpened }: { onOpened: () => void }) {
+  const chat = useChat()
+  useEffect(() => {
+    void useChat.getState().loadChats()
+  }, [])
+  if (!chat.chats) return <div className="chat-history"><p className="hint">Loading...</p></div>
+  if (chat.chats.length === 0) return <div className="chat-history"><p className="hint">No saved chats yet. A chat is saved after its first message.</p></div>
+  return (
+    <div className="chat-history" data-testid="chat-history">
+      {chat.chats.map((c) => (
+        <div key={c.id} className={`chat-history-row${c.id === chat.chatId ? ' current' : ''}`}>
+          <button
+            className="chat-history-open"
+            disabled={chat.running}
+            title={chat.running ? 'Wait for the agent or stop it first' : 'Show this chat and continue it'}
+            onClick={() => void chat.openChat(c.id).then(onOpened)}
+            data-testid="chat-history-open"
+          >
+            <span className="chat-history-title">{c.title}</span>
+            <span className="chat-history-meta">
+              {c.turns} {c.turns === 1 ? 'message' : 'messages'} - {when(c.updatedAt)}
+            </span>
+          </button>
+          <button title="Delete this chat" disabled={chat.running && c.id === chat.chatId} onClick={() => void chat.deleteChat(c.id)} data-testid="chat-history-delete">
+            Delete
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ChatPanel() {
   useSession()
   const chat = useChat()
@@ -62,6 +100,7 @@ export function ChatPanel() {
   const selectedRef = chat.overview?.selectedModel ?? ''
   const active = models.find((m) => m.ref === (selectedRef || chat.overview?.defaultModel))
   const canUndo = canUndoAgentTurn(chat.turn, session.history.undoDepth, session.undoLabel(), session.canUndo())
+  const [showHistory, setShowHistory] = useState(false)
 
   useEffect(() => {
     const el = scroller.current
@@ -80,12 +119,25 @@ export function ChatPanel() {
         <button title="Undo everything the agent did in its last turn (one step)" disabled={chat.running || !canUndo} onClick={chat.undoTurn} data-testid="chat-undo-turn">
           Undo agent turn
         </button>
-        <button title="Start a new conversation" onClick={() => void chat.newChat()} data-testid="chat-new">New chat</button>
+        <button className={showHistory ? 'active' : ''} title="Saved chats: open one to continue it" onClick={() => setShowHistory((v) => !v)} data-testid="chat-history-toggle">
+          History
+        </button>
+        <button
+          title="Start a new conversation"
+          onClick={() => {
+            setShowHistory(false)
+            void chat.newChat()
+          }}
+          data-testid="chat-new"
+        >
+          New chat
+        </button>
       </header>
       <div className="chat-model">
         <select
           value={selectedRef}
           onChange={(e) => void chat.selectModel(e.target.value || null)}
+          onFocus={() => void chat.refreshModels()}
           disabled={chat.running}
           title="Model for this chat"
           data-testid="chat-model"
@@ -101,7 +153,8 @@ export function ChatPanel() {
         <Badges m={active} />
       </div>
       {chat.overviewError && <div className="msg error-msg">{chat.overviewError}</div>}
-      <div className="chat-log" ref={scroller} data-testid="chat-log">
+      {showHistory && <ChatHistory onOpened={() => setShowHistory(false)} />}
+      <div className="chat-log" ref={scroller} data-testid="chat-log" hidden={showHistory}>
         {chat.items.length === 0 && (
           <p className="hint">Ask the agent to draw something, for example: "a 16x16 sword icon with a 4-colour palette". Enter sends, Shift+Enter adds a line.</p>
         )}
