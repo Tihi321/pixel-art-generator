@@ -194,14 +194,15 @@ It is the single source for the built-in agent's system prompt, the MCP instruct
   2. Run `claude mcp add --transport http pixel-studio http://127.0.0.1:7457/mcp`. Ask Claude Code to make a background in the style of a saved asset, and check that it uses `get_style_context` and the reference palette.
 
 ## Implementation tracking
-- Branch: `pixel-studio-editor-llm-mcp` (from `origin/master`). There is no ticket id. The `PICO-8` prefix on the folder came from the plan-to-ticket hook and is not a ticket.
+- Branch (session 1): `pixel-studio-editor-llm-mcp` (from `origin/master`), merged to master via PR #1 (affea89 / 3fa11b0).
+- Branch (session 2, 2026-10-12): `pixel-studio-tools-ui-mcp` (from `origin/master` 3fa11b0). Continues from the rest of Phase 3A. There is no ticket id. The `PICO-8` prefix on the folder came from the plan-to-ticket hook and is not a ticket.
 - Execution phases (orchestrator):
   - [x] Phase 1: M1 scaffold, with every dependency in the plan installed
   - [x] Phase 2: M2 core (+ the core codecs for M4/M5), in parallel with M7a (LLM layer copy + tool calling in the clients, `src/llm/**` only)
-  - [~] Phase 3 (3A partial; see handoff.md): M6 ToolRegistry + M3/M4/M5 editor UI + tool bridge
-  - [ ] Phase 4: M7b agent loop + chat/settings UI, and M8 MCP server + stdio shim + guide
-  - [ ] Phase 5: M9 asset library + style references
-  - [ ] Final verification: typecheck, vitest, Electron smoke test
+  - [x] Phase 3: M6 ToolRegistry + M3/M4/M5 editor UI + tool bridge. 3A (ToolRegistry, 48 tools, guide, main ToolBridge + services, renderer bridge client) and 3B (editor UI) DONE 2026-10-12; `startToolBridge` wired in `src/renderer/main.tsx`
+  - [x] Phase 4: M7b agent loop + chat/settings UI, and M8 MCP server + stdio shim + guide. DONE 2026-10-12
+  - [x] Phase 5: M9 asset library + style references (+ final integration e2e). DONE 2026-10-12
+  - [x] Final verification: typecheck, vitest, Electron smoke test. DONE 2026-10-12 (manual end-to-end with real LLM endpoints and `yarn dist` still not run)
 
 ### Verification log
 
@@ -237,3 +238,53 @@ It is the single source for the built-in agent's system prompt, the MCP instruct
 - NOT DONE: `src/tools/defs/export.ts` (export_png, export_spritesheet, export_gif), `src/tools/defs/history.ts` (undo, redo), `src/tools/defs/index.ts` + `createDefaultRegistry()` and re-exports in `src/tools/index.ts` (the defs arrays are not registered anywhere yet), `docs/llm-guide.md` + `src/tools/guide.ts` (GUIDE, GUIDE_SHORT), `src/main/toolBridge.ts`, `src/main/services.ts`, `src/main/index.ts` wiring, `src/renderer/toolBridgeClient.ts` (+ renderer IPC ToolServices), all of `tests/tools/**`
 - Status: `yarn typecheck` pass (exit 0), `yarn lint` pass, `yarn test` pass (12 files / 120 tests; no new tests). `yarn build` not run.
 - Known nits: reading.ts render_preview background parsing has a redundant `|| hexToRgba(...)`; palette.ts remap_to_palette resolves layer/frame ad hoc instead of via resolveLayer/resolveFrame.
+
+#### Phase 3A (completion) — 2026-10-12
+- Files: `src/tools/defs/{export,history,index}.ts`, `src/tools/index.ts` (re-exports), `src/tools/guideText.ts` (generated), `docs/llm-guide.md`, `scripts/gen-guide.mjs` + `scripts/gen-guide.d.mts`, `package.json` (`gen:guide` script), `src/main/{toolBridge,services,index}.ts`, `src/renderer/toolBridgeClient.ts`, `tests/tools/{helpers,tools,registry,guide,toolBridgeClient}*.ts`, `tests/main/{toolBridge,services}.test.ts`; nits fixed in `src/tools/defs/reading.ts` (redundant `|| hexToRgba`) and `src/tools/defs/palette.ts` (`remap_to_palette` now uses resolveLayer/resolveFrame).
+- Tools: 48 registered (43 from the partial + export_png, export_spritesheet, export_gif + undo, redo = 48; `set_active` is among the 43).
+- `yarn typecheck`: pass (exit 0). `yarn lint`: pass (exit 0). `yarn test`: pass, 24 files / 221 tests (the files in tests/tools + tests/main: 6 files / 61 tests; the rest are core, llm and the renderer agent's tests). `yarn build`: pass (exit 0).
+- Deviations: `noTransaction` already existed in registry.ts. `ToolBridge` returns error results (never throws) for timeout/abort/not-ready; `beginTurn` throws if the editor is not ready. User palettes are stored as `<name>.hex` (display name = file stem; the .hex format has no name). `registerServices`/`ToolBridge.registerIpc` take an ipcMain-like object so they are testable without Electron. `startToolBridge`/`createIpcServices` take an optional `api` argument (default `window.pixelStudio`) for tests. Main exports `getToolBridge()` and `getServices()` from `src/main/index.ts`.
+- Not done / not verified: `yarn test:electron` not run; the bridge has not been exercised in a real Electron window (renderer wiring pending).
+
+#### Phase 3B (M3/M4/M5 editor UI) + bridge wiring — 2026-10-12
+- Files: `src/renderer/{App.tsx,main.tsx,styles.css,pixelStudio.d.ts}`, `src/renderer/state/{session,ui,actions,input}.ts`, `src/renderer/hooks/{useSession,useShortcuts,usePlayback}.ts`, `src/renderer/lib/{viewport,keys,playback,toolController,compose,exporter,files}.ts`, `src/renderer/components/{CanvasView,Toolbar,OptionsBar,MenuBar,LayersPanel,Timeline,PalettePanel,ExportDialog,Dialogs,Controls,Icons}.tsx`, `tests/renderer/{viewport,keys,playback,toolController,compose,exporter}.test.ts`, `tests/e2e/smoke.spec.ts`
+- Orchestrator wired `startToolBridge(createDefaultRegistry(), session, createIpcServices())` in `src/renderer/main.tsx`.
+- `yarn typecheck`: pass. `yarn lint`: pass. `yarn test`: pass, 24 files / 221 tests. `yarn test:electron` (build + Playwright): pass, 2 tests (pencil stroke = 1 undo step, add frame + undo/redo, sprite sheet export via UI checks PNG signature + 2-frame JSON).
+- Deviations: no native open/save dialogs (filename/path inputs resolved through `fs:resolveProjectPath`/`fs:resolveExportPath`; Open and palette import also offer a browser file picker). Strokes use `createRasterDiffCommand` (one command on pointer-up). Binary IPC uses `Uint8Array`. New/Open clear history. Frame reorder uses move buttons, not drag. No UI yet to create reference layers (Phase 5); no copy/paste.
+
+#### Phase 4 (M8 MCP + M7b agent runner, chat, settings) — 2026-10-12
+- Contract written by the orchestrator first: `src/shared/mcp.ts` (`MCP_IPC`, `McpSettings`, `McpStatus`, `McpSnippets`, `McpState`, `DEFAULT_MCP_PORT`), so both parts could run in parallel.
+- M8 files: `src/main/{mcp,mcpContent,mcpSettings,mcpApp}.ts`, `src/mcp-stdio/{index,relay}.ts`, `tests/mcp/{helpers,server,settings,stdio}.test.ts`, `package.json` (`bin: pixel-studio-mcp`).
+  - Low-level SDK `Server` over `StreamableHTTPServerTransport`, one server/transport per session, `127.0.0.1` only, `/mcp`. Optional bearer token (constant-time), Host/Origin check plus SDK DNS-rebinding protection, EADDRINUSE goes to `status.error`.
+  - `instructions` = `GUIDE_SHORT`. Resources: `pixel-studio://{guide,document,palettes,assets}` (assets lights up when a `list_assets` tool exists). Prompts: `create_sprite`, `animate_sprite`, `match_style`.
+  - Settings in `~/PixelStudio/config/mcp.json`. No `beginTurn` wrapping: the registry already makes one tool call one undo step.
+  - stdio shim relays raw JSON-RPC between `StdioServerTransport` and `StreamableHTTPClientTransport` (`PIXEL_STUDIO_MCP_URL`/`_TOKEN`); a clear JSON-RPC error when the app is not running (smoke-tested on the built shim).
+- M7b files: `src/shared/agent.ts` (`AGENT_IPC`, `LLM_IPC`, payload types), `src/main/{agent,llm,appSettings,agentIpc}.ts`, `src/renderer/state/{chat,chatReducer}.ts`, `src/renderer/lib/agentApi.ts`, `src/renderer/components/{ChatPanel,SettingsDialog}.tsx`, edits to `App.tsx`, `MenuBar.tsx`, `state/ui.ts`, `hooks/useShortcuts.ts`, `styles.css`, `seed/config/{providers,roles}.md`, `tests/main/{agent,agentLlm}.test.ts`, `tests/renderer/chatReducer.test.ts`, `tests/llm/registry.test.ts` (ids), `tests/e2e/smoke.spec.ts`.
+  - `AgentRunner`: system = GUIDE + `get_document` summary + `get_style_context` when present. Each run is one `beginTurn('Agent: …')`/`endTurn`; a run ending in `error` is rolled back. One run at a time; stop aborts; history is kept in main and cleared on reset. `withAutoPreview` appends a `render_preview` image after drawing tools for vision models.
+  - Keys via keyring; key values never go to the renderer. The selected model is persisted in `~/PixelStudio/config/app.json`. Anthropic seed models are now `claude-opus-5-5`/`claude-sonnet-5-5`/`claude-haiku-5-5` (no prices, so they show $0).
+  - Bug found by e2e and fixed: seed dir resolution walks up from `app.getAppPath()`.
+- `yarn typecheck`: pass. `yarn lint`: pass. `yarn test`: pass, 30 files / 269 tests. `yarn build`: pass. `yarn test:electron`: pass, 4 tests (the 2 new ones cover the Chat tab with no shortcut leakage, and Settings with its Providers/MCP tabs).
+- Deviations: the data folder is read-only in Settings. The chat transcript lives only in the renderer (lost on reload; history persists in main). The right column has Palette/Layers and Chat tabs (320 px).
+- Not run: real LLM endpoints, `yarn dist`.
+
+
+#### Phase 5 (M9 assets + style references) — 2026-10-12
+- Files:
+  - Store and IPC: `src/main/assets.ts` (AssetStore: list/get/save/delete/thumbnail/watch, `registerAssetIpc`, meta.md via `src/llm/md.ts`), `src/main/assetsApp.ts` (Electron glue + chokidar watch pushing `assets:changed`), `src/shared/assets.ts` (`ASSETS_IPC`, `ASSET_KINDS`), `src/main/index.ts` (one `startAssets()` call), `src/tools/services.ts` (`AssetService.thumbnail`), `src/tools/memoryServices.ts` (in-memory `assets`), `src/renderer/toolBridgeClient.ts` (`assets` in `createIpcServices`).
+  - Tools: `src/tools/defs/assets.ts` (list_assets, get_asset, save_as_asset, place_asset, set_style_reference, get_style_context), `src/tools/assetOps.ts` (sub-document building, grid samples, previews, thumbnails), `src/tools/defs/index.ts` (registered; 54 tools total).
+  - Guide: `docs/llm-guide.md` ("References and assets" section + one short-guide bullet), regenerated `src/tools/guideText.ts`.
+  - Agent: `src/main/agent.ts` (style context skipped when the text starts with "No style references"; reference preview images attached to the first user message for vision models).
+  - UI: `src/renderer/components/{AssetsPanel,SaveAssetDialog}.tsx`, `src/renderer/hooks/useAssets.ts`, `src/renderer/lib/tools.ts` (runs the registry from the UI on the live session), `src/renderer/state/assetActions.ts`, edits to `App.tsx` (third tab), `CanvasView.tsx` (drop target), `state/ui.ts`, `styles.css`.
+  - Env overrides: `PIXEL_STUDIO_HOME` (`defaultRoot()` in `src/main/services.ts`, `src/main/llm.ts`, `src/llm/registry.ts` `defaultConfigDir`), `PIXEL_STUDIO_MCP_PORT` (`withEnvOverrides` in `src/main/mcpSettings.ts`, applied in memory at start, mcp.json is not rewritten).
+  - Tests: `tests/main/assets.test.ts` (13), `tests/tools/assets.test.ts` (23), `tests/mcp/assets.test.ts` (1) + env tests in `tests/mcp/settings.test.ts` (2), 2 new cases in `tests/main/agent.test.ts`, tool-count updates (`tests/tools/registry.test.ts`, `tests/main/toolBridge.test.ts`, `tests/mcp/{server,stdio}.test.ts`), `tests/e2e/launch.ts` (isolated launcher), `tests/e2e/integration.spec.ts` (2), `tests/e2e/smoke.spec.ts` now launches through `launch.ts`.
+- Commands: `yarn gen:guide`: pass. `yarn typecheck`: pass. `yarn lint`: pass. `yarn test`: pass, 33 files / 310 tests. `yarn build`: pass. `yarn test:electron` (build + Playwright): pass, 6 tests (4 smoke + 2 integration).
+- Integration e2e: an SDK `Client` over `StreamableHTTPClientTransport` calls `new_document` + `draw_grid` on the running app; `window.__pixelStudio.session` shows the document and the pixels, one `session.undo()` reverts only the draw_grid (and redo restores it). The second test saves an asset over MCP, checks `asset.pxs`/`thumb.png`/`meta.md` under the isolated `PIXEL_STUDIO_HOME`, sees the card appear live in the Assets tab, filters, places it with the button and by dragging the thumbnail onto the canvas (one undo step each), toggles the style reference, saves through the dialog and deletes with the inline confirmation.
+- Deviations: `save_as_asset` is marked `readOnly` (no undo step; it writes to the library, not the document). Asset ids/tools accept an exact asset name as well as an id. `get_asset` on a bigger-than-64 asset returns a 64x64 crop at the first visible pixels (with a note) instead of omitting the grid; `get_style_context` samples are capped at 32x32 the same way. A "Ref: <asset id>" layer is created per referenced asset (bottom, 0.4 opacity, locked, kind reference) and removed again when the reference is removed. There is no `delete_asset` tool on purpose (the LLM should not delete the user's library); delete is a UI action calling the service directly. UI tool calls go through `registry.execute` on the session directly, not through the bridge's serialized host (they are refused while an agent turn is active). Reference layers were already excluded from export_png, export_spritesheet, export_gif and flattenFrame by default, so no core fix was needed (covered by a test).
+- Not run: real LLM endpoints (vision images on the first message were tested with the mock provider only), `yarn dist`.
+
+#### Final verification (orchestrator) — 2026-10-12
+- `yarn gen:guide`: pass (generated file unchanged). `yarn typecheck`: pass (exit 0). `yarn lint`: pass (exit 0).
+- `yarn test`: pass, 33 files / 310 tests.
+- `yarn test:electron` (build + Playwright Electron, isolated through `PIXEL_STUDIO_HOME` + a free `PIXEL_STUDIO_MCP_PORT`): pass, 6 tests, 0 skipped. The integration tests drive the running app over MCP: tool calls show in the live renderer session, one undo reverts one call, and assets saved over MCP appear in the Assets panel and can be placed and deleted from it.
+- Not run: the manual end-to-end scenarios (a real LM Studio/Strata/cloud model, a Claude Code MCP session), and `yarn dist` packaging.
+

@@ -42,12 +42,15 @@ export interface AssetSaveInput {
   thumbnail?: Uint8Array
 }
 
-/** Placeholder interface for the asset library (implemented in Phase 5; tools for it come with it). */
+/** The asset library (~/PixelStudio/assets; see src/main/assets.ts). */
 export interface AssetService {
   list(filter?: AssetFilter): Promise<AssetMeta[]>
   get(id: string): Promise<AssetData | null>
+  /** Saves (a given `meta.id` overwrites that asset) and returns the stored metadata, with its id. */
   save(input: AssetSaveInput): Promise<AssetMeta>
   delete(id: string): Promise<boolean>
+  /** Thumbnail PNG bytes, or null when the asset or its thumbnail does not exist. */
+  thumbnail(id: string): Promise<Uint8Array | null>
 }
 
 export interface ToolServices {
@@ -68,6 +71,6 @@ export interface ToolServices {
   saveUserPalette(palette: Palette): Promise<UserPaletteInfo & { path?: string }>
   /** Load a user palette by id or name; null when unknown. */
   loadUserPalette(idOrName: string): Promise<Palette | null>
-  /** Asset library. Undefined until Phase 5. */
+  /** Asset library. Undefined in hosts without one (the asset tools then report that). */
   assets?: AssetService
 }

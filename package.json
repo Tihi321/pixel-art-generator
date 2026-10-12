@@ -5,6 +5,9 @@
   "private": true,
   "description": "Pixel Studio: a pixel-art editor with a built-in LLM agent and an MCP server",
   "main": "./out/main/index.js",
+  "bin": {
+    "pixel-studio-mcp": "./out/mcp-stdio/index.js"
+  },
   "scripts": {
     "postinstall": "install-electron",
     "build:mcp": "vite build --config vite.mcp.config.ts --logLevel warn",
@@ -14,6 +17,7 @@
     "test:electron": "yarn build && playwright test --config playwright.electron.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
+    "gen:guide": "node scripts/gen-guide.mjs",
     "dist": "yarn build && electron-builder --config electron-builder.yml --win nsis --x64"
   },
   "dependencies": {

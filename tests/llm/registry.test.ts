@@ -54,7 +54,8 @@ describe('seed config', () => {
     const qwen = registry.getModel('lmstudio/nail-qwen3.6-35b-a3b-mtp')!
     expect(qwen).toMatchObject({ tools: true, vision: false, loadContext: 65536 })
     expect(registry.getModel('lmstudio/google/gemma-4-e4b')).toMatchObject({ tools: false, vision: true })
-    expect(registry.getModel('anthropic/claude-sonnet-4-5')).toMatchObject({ tools: true, vision: true, priceIn: 3 })
+    expect(registry.getModel('anthropic/claude-sonnet-5-5')).toMatchObject({ tools: true, vision: true })
+    expect(registry.getModel('claude')?.ref).toBe('anthropic/claude-sonnet-5-5')
     const flash = registry.getModel('deepseek/deepseek-flash')!
     expect(flash).toMatchObject({ priceIn: 0.3, priceCachedIn: 0.006, tools: true, extraBody: { thinking: { type: 'disabled' } } })
     expect(isPaidModel(flash)).toBe(true)
@@ -76,7 +77,7 @@ describe('seed config', () => {
       'lmstudio/nail-qwen3.6-35b-a3b-mtp',
       'strata/qwen3.8-flash-next',
       'deepseek/deepseek-flash',
-      'anthropic/claude-sonnet-4-5'
+      'anthropic/claude-sonnet-5-5'
     ])
     expect(router.candidates('artist', { requireTools: true })).toHaveLength(4)
   })
