@@ -97,13 +97,15 @@ test('the Chat tab renders and typing in it does not trigger editor shortcuts', 
   await expect(page.getByTestId('layers-panel')).toBeVisible()
 })
 
-test('Settings opens from the menu and with Ctrl+, and shows the Providers and MCP tabs', async () => {
+test('Settings opens from the menu and with Ctrl+, and shows the Providers, Models and MCP tabs', async () => {
   await page.getByTestId('btn-settings').click()
   await expect(page.getByTestId('settings-dialog')).toBeVisible()
   await expect(page.getByTestId('settings-providers')).toBeVisible()
   await expect(page.getByTestId('provider-anthropic')).toBeVisible({ timeout: 15000 })
   await expect(page.getByTestId('key-input-anthropic')).toHaveAttribute('type', 'password')
   await expect(page.getByTestId('settings-data-dir')).toContainText('PixelStudio')
+  await page.getByTestId('settings-tab-models').click()
+  await expect(page.getByTestId('settings-models')).toBeVisible()
   await page.getByTestId('settings-tab-mcp').click()
   // Either the live state or a graceful "unavailable" message, never a crash.
   await expect(page.getByTestId('settings-mcp')).toBeVisible()

@@ -6,6 +6,7 @@ import type { ToolId } from '../lib/keys'
 import { type Viewport, MAX_ZOOM, MIN_ZOOM } from '../lib/viewport'
 
 export type DialogId = null | 'new' | 'open' | 'save' | 'export' | 'resize' | 'settings' | 'saveAsset'
+export type SettingsTab = 'providers' | 'models' | 'mcp'
 export type PanelTab = 'edit' | 'assets' | 'chat'
 
 export interface UiState {
@@ -40,6 +41,8 @@ export interface UiState {
   assetAnimation: boolean
   assetShowRefLayer: boolean
   dialog: DialogId
+  /** The Settings tab the dialog opens on. */
+  settingsTab: SettingsTab
   projectPath: string | null
   status: string
 
@@ -48,6 +51,8 @@ export interface UiState {
   setViewport: (vp: Viewport) => void
   setStatus: (msg: string) => void
   openDialog: (d: DialogId) => void
+  /** Opens Settings on a tab. */
+  openSettings: (tab: SettingsTab) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -76,6 +81,7 @@ export const useUi = create<UiState>((set) => ({
   assetAnimation: false,
   assetShowRefLayer: false,
   dialog: null,
+  settingsTab: 'providers',
   projectPath: null,
   status: '',
 
@@ -83,5 +89,6 @@ export const useUi = create<UiState>((set) => ({
   setTool: (tool) => set({ tool }),
   setViewport: (vp) => set({ viewport: { zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, vp.zoom)), panX: vp.panX, panY: vp.panY } }),
   setStatus: (status) => set({ status }),
-  openDialog: (dialog) => set({ dialog })
+  openDialog: (dialog) => set(dialog === 'settings' ? { dialog, settingsTab: 'providers' } : { dialog }),
+  openSettings: (settingsTab) => set({ dialog: 'settings', settingsTab })
 }))
