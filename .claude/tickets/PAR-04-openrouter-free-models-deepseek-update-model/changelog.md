@@ -21,7 +21,7 @@ The dropdown always keeps the "Default (...)" option, which resolves through `ro
 - `yarn test`: 338 passed. The orchestrator re-ran this.
 - `yarn test:electron`: 7 passed. The implementer ran this.
 
-**Commit status:** uncommitted.
+**Commit status:** committed as 1d4564b on `PAR-04_openrouter_model_picker` (not pushed).
 
 ## 2026-10-13 — PAR-04: OpenRouter free models, DeepSeek update, Models picker
 
@@ -113,4 +113,4 @@ The chat model dropdown now shows only the models you pick in Settings > Models.
 - A hidden model can still be named in `roles.md` and used by the Default option or a fallback. The router is unchanged, as decided.
 
 ### Commit status
-Uncommitted on `PAR-04_openrouter_model_picker`.
+Committed as 1d4564b on `PAR-04_openrouter_model_picker` (not pushed).
