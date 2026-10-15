@@ -33,8 +33,10 @@ import {
   getBuiltinPalette,
   serializeProject
 } from '../../core'
+import { type DocumentHost, type ExportTarget, exportToTarget } from '../../tools/documents'
 import { EditorSession } from '../../tools/session'
 import { decodeText, readFile, resolveProjectPath, writeFile } from '../lib/files'
+import { createIpcServices } from '../toolBridgeClient'
 import { session, workspace } from './session'
 import { useUi } from './ui'
 
@@ -294,7 +296,78 @@ export async function saveProject(nameOrPath?: string): Promise<boolean> {
     tab.savedEdits = edits
     if (workspace.activeId === tab.id) ui.set({ projectPath: path })
     ui.setStatus(`Saved ${path}`)
+    // VN Studio round trip: a document opened with exportTo also writes its PNG on every save
+    if (tab.exportTo) {
+      try {
+        const exported = await exportToTarget({ documentId: tab.id, session: tab.session, path, exportTo: tab.exportTo }, createIpcServices())
+        ui.setStatus(`Saved ${path} and exported ${exported}`)
+      } catch (e) {
+        ui.setStatus(`Saved ${path}, but the PNG export failed: ${message(e)}`)
+      }
+    }
     return true
   })
   return r === true
+}
+
+// ---------------------------------------------------------------- documents for the tools (MCP / chat agent)
+
+/**
+ * The tool registry's view of the tabs: a document id is a tab id. A document a tool adds (import_image,
+ * open_document, draw_sprite_from_reference) opens in a new tab and becomes the active one; while the
+ * agent works in the active tab it replaces that tab's document instead (undoable), because the agent's
+ * tool calls must keep going to the same tab.
+ */
+export const workspaceDocuments: DocumentHost = {
+  list: () =>
+    workspace.tabs.map((t) => ({
+      documentId: t.id,
+      name: t.session.doc.name,
+      width: t.session.doc.width,
+      height: t.session.doc.height,
+      path: t.projectPath,
+      current: t.id === workspace.activeId,
+      dirty: workspace.isDirty(t)
+    })),
+  resolve(documentId) {
+    const tab = documentId ? workspace.find(documentId) : workspace.active
+    if (!tab) throw new Error(`Unknown document "${documentId}". Call list_documents to see the open documents.`)
+    return { documentId: tab.id, session: tab.session, path: tab.projectPath, exportTo: tab.exportTo }
+  },
+  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}) {
+    const path = opts.path ?? null
+    const active = workspace.active
+    if (active.session.turnActive) {
+      active.session.replaceDocument(doc, { label: `Open ${doc.name}` })
+      active.exportTo = opts.exportTo
+      showActiveTab()
+      return active.id
+    }
+    openInTab(doc, path, `Open ${doc.name}`, workspace.isPristine())
+    const tab = workspace.active
+    tab.exportTo = opts.exportTo
+    // a document that exists only in memory is unsaved work: it is not "pristine" and closing it asks first
+    if (path === null) {
+      tab.edits = Math.max(tab.edits, 1)
+      tab.savedEdits = 0
+    }
+    return tab.id
+  },
+  findByPath: (path) => workspace.findByPath(path)?.id,
+  activate(documentId) {
+    if (!workspace.find(documentId)) throw new Error(`Unknown document "${documentId}".`)
+    stashActiveTab()
+    workspace.activate(documentId)
+    showActiveTab()
+  },
+  setExportTarget(documentId, target) {
+    const tab = workspace.find(documentId)
+    if (tab) tab.exportTo = target
+  },
+  markSaved(documentId, path) {
+    const tab = workspace.find(documentId)
+    if (!tab) return
+    workspace.markSaved(path, tab)
+    if (workspace.activeId === tab.id) useUi.getState().set({ projectPath: path })
+  }
 }

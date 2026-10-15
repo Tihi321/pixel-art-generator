@@ -68,7 +68,7 @@ describe('node services', () => {
     const handlers = new Map<string, (e: unknown, ...a: unknown[]) => unknown>()
     registerServices({ handle: (c, l) => void handlers.set(c, l) }, createNodeServices(join(root, 'd')))
     const channels = Object.values(IPC).filter((c) => c.startsWith('fs:') || c.startsWith('palettes:'))
-    expect(channels.length).toBe(7)
+    expect(channels.length).toBe(8)
     for (const c of channels) expect(handlers.has(c), c).toBe(true)
     const p = (await handlers.get(IPC.fsResolveExportPath)!({}, 'q.png')) as string
     await handlers.get(IPC.fsWriteFile)!({}, p, 'data')

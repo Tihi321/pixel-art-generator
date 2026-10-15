@@ -71,6 +71,8 @@ export interface ToolServices {
   saveUserPalette(palette: Palette): Promise<UserPaletteInfo & { path?: string }>
   /** Load a user palette by id or name; null when unknown. */
   loadUserPalette(idOrName: string): Promise<Palette | null>
+  /** Decode a non-PNG image (JPEG, WebP...) to RGBA. Undefined in hosts that cannot (then only PNG imports work). */
+  decodeImage?(bytes: Uint8Array): Promise<{ width: number; height: number; data: Uint32Array }> | { width: number; height: number; data: Uint32Array }
   /** Asset library. Undefined in hosts without one (the asset tools then report that). */
   assets?: AssetService
 }

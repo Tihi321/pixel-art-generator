@@ -8,8 +8,9 @@ import { historyTools } from './history'
 import { layerTools } from './layers'
 import { paletteTools } from './palette'
 import { readingTools } from './reading'
+import { studioTools } from './studio'
 
-export { assetTools, documentTools, drawingTools, exportTools, frameTools, historyTools, layerTools, paletteTools, readingTools }
+export { assetTools, documentTools, drawingTools, exportTools, frameTools, historyTools, layerTools, paletteTools, readingTools, studioTools }
 
 export const allTools = [
   ...documentTools,
@@ -20,6 +21,7 @@ export const allTools = [
   ...paletteTools,
   ...assetTools,
   ...exportTools,
+  ...studioTools,
   ...historyTools
 ]
 

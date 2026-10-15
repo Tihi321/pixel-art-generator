@@ -10,7 +10,8 @@ Pixel Studio quick guide
 - Use only palette colours and hue-shifted ramps (shadows cooler, highlights warmer). Keep sprites small (16-64 px).
 - Animation: `duplicate_frame`, then edit only the differences; keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8, attack 3-6); `set_frame_duration` in ms.
 - References: if `get_document` lists `references`, call `get_style_context` first and use exactly its palette. Library: `list_assets`, `place_asset`, `save_as_asset`.
-- Export: `export_png`, `export_spritesheet` (png + json), `export_gif`. `undo` / `redo` fix mistakes.
+- Export: `export_png` (`width`+`height` = exact size), `export_spritesheet`, `export_gif`. `undo` / `redo` fix mistakes.
+- Images: `import_image` makes pixel art from a PNG in a new document (`list_documents`, `document` ids).
 - Errors come back as text: read them and correct the call.
 <!-- short:end -->
 
@@ -83,9 +84,20 @@ The asset library holds finished art (kinds: character, background, tile, prop),
 - **Reuse:** `place_asset` stamps an asset at `x`,`y` on the active layer, a given `layer`, or a new layer (`newLayer`). With `frames: "all"` it copies the asset's whole animation onto consecutive frames and adds frames when needed. Placed colors are not changed; if they are not in the document palette you are told, and `remap_to_palette` snaps them. Edit the result afterwards like any other art.
 - **Saving:** `save_as_asset` stores part of the document: `source` "document", "layer", "frames" (a range) or "region" (a rectangle). Give a clear `name`, a `kind`, a few `tags` and `notes` that describe the style (outline, shading, palette mood), because those notes are what the next artist reads. Pass `id` to update an existing asset. Only save art the user asked to keep.
 
+## Several documents, images and VN Studio
+
+Pixel Studio can hold several documents at once (tabs in the window, an in-memory set when it runs headless). Every document has a `documentId`; `list_documents` shows them. All drawing tools work on the **current** document, and tools that create a document (`import_image`, `draw_sprite_from_reference`, `open_document`) make the new one current. `export_png` and `export_many` take a `document` id, so you can export an earlier one without switching.
+
+- `import_image {path, width, height, palette, dither, outline, cleanup}`: converts a PNG (or JPEG when the app can decode it) to clean pixel art in a new document: area-average downscale that respects transparency, alpha threshold, snap to the palette (`none`, `ordered` or `floyd` dithering; transparent pixels are never dithered), removal of orphan single pixels, optional 1 px `outline` (`true` = the darkest palette colour, or a hex colour). Without `palette`, `maxColors` (default 32) colours are picked from the image. Max 512x512. Example: `{"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}`.
+- `export_png {width, height}`: an exact output size with nearest-neighbour scaling, not only integer factors. A 320x180 document exported at `1920x1080` is a clean 6x. `export_many {items:[{document, path, width, height, frame}]}` writes several files in one call.
+- `draw_sprite_from_reference {reference, width, height, palette, expression}`: for chibi or retro sprites up to 128x128. It makes a new document with the reference as a dimmed, locked, never-exported reference layer. You then paint the layer "Sprite" with `draw_grid`, compare with `render_preview`, and export.
+- `open_document {path, exportTo, exportWidth, exportHeight}` opens a `.pxs` project or a PNG. With `exportTo` every `save_document` (and Ctrl+S in the window) also writes the PNG there, so edits flow back to the app that asked for them. `save_document {document, path}` saves the project.
+- The new and changed tools end their result with one JSON object (documentId, size, paths, ...) after the readable text.
+- **Headless:** `yarn mcp` (`electron . --mcp-only [--port N]`, after `yarn build`) serves the same tools at `http://127.0.0.1:7457/mcp` with no window. In the window app, `--open <path> [--export-to <path>] [--export-width W --export-height H]` opens a document in the running or a new window.
+
 ## Export
 
-- `export_png`: the current frame, or all frames as separate files (`"frames":"all"`). Supports `scale`.
+- `export_png`: the current frame, or all frames as separate files (`"frames":"all"`). Supports `scale`, or an exact `width` x `height`.
 - `export_spritesheet`: one PNG with all frames plus a JSON file next to it. Options: `layout` (horizontal, vertical, grid with `columns`, packed), `scale`, `padding`, `border`, `tags`, `layers`, and the JSON `format` (aseprite-array, aseprite-hash, texturepacker). Example: `{"path":"knight","layout":"grid","columns":4,"scale":2,"padding":1}`.
 - `export_gif`: an animated GIF, optionally of one tag.
 - All three return the written file paths. Relative names go to `~/PixelStudio/exports`. Tell the user where the files are.

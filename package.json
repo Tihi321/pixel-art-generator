@@ -17,6 +17,7 @@
     "test:electron": "yarn build && playwright test --config playwright.electron.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
+    "mcp": "electron . --mcp-only",
     "gen:guide": "node scripts/gen-guide.mjs",
     "dist": "yarn build && electron-builder --config electron-builder.yml --win nsis --x64"
   },

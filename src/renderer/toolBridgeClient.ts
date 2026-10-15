@@ -4,6 +4,7 @@
 
 import type { Palette } from '../core'
 import { IPC, type PixelStudioApi, type ToolCancelRequest, type ToolExecuteRequest, type ToolResultPayload, type ToolTurnRequest, type Unsubscribe } from '../shared/ipc'
+import type { DocumentHost } from '../tools/documents'
 import type { EditorSession } from '../tools/session'
 import { type ToolRegistry, createToolHost } from '../tools/registry'
 import { ASSETS_IPC } from '../shared/assets'
@@ -20,6 +21,10 @@ export function createIpcServices(api: PixelStudioApi = defaultApi()): ToolServi
     readFile: async (path) => {
       const r = await api.invoke<Uint8Array | ArrayBuffer>(IPC.fsReadFile, path)
       return r instanceof Uint8Array ? r : new Uint8Array(r)
+    },
+    decodeImage: async (bytes) => {
+      const r = await api.invoke<{ width: number; height: number; data: Uint32Array | ArrayBuffer }>(IPC.fsDecodeImage, bytes)
+      return { width: r.width, height: r.height, data: r.data instanceof Uint32Array ? r.data : new Uint32Array(r.data) }
     },
     resolveExportPath: (name, dir) => api.invoke<string>(IPC.fsResolveExportPath, name, dir),
     resolveProjectPath: (name, dir) => api.invoke<string>(IPC.fsResolveProjectPath, name, dir),
@@ -44,8 +49,14 @@ export function createIpcServices(api: PixelStudioApi = defaultApi()): ToolServi
  * Start answering `tools:execute` / `tools:turn` / `tools:cancel` from main, then announce `tools:ready`.
  * Returns a function that stops listening. Call it once, after the registry and session exist.
  */
-export function startToolBridge(registry: ToolRegistry, session: EditorSession, services: ToolServices, api: PixelStudioApi = defaultApi()): () => void {
-  const host = createToolHost(registry, () => ({ session, services }))
+export function startToolBridge(
+  registry: ToolRegistry,
+  session: EditorSession,
+  services: ToolServices,
+  api: PixelStudioApi = defaultApi(),
+  documents?: DocumentHost
+): () => void {
+  const host = createToolHost(registry, () => ({ session, services, documents }))
   const inFlight = new Map<string, AbortController>()
   const unsubs: Unsubscribe[] = []
 

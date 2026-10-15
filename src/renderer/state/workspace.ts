@@ -4,6 +4,7 @@
 
 import { createDocument } from '../../core'
 import type { HistoryEvent } from '../../core'
+import type { ExportTarget } from '../../tools/documents'
 import { EditorSession } from '../../tools/session'
 import type { Viewport } from '../lib/viewport'
 
@@ -19,6 +20,8 @@ export interface DocTab {
   /** Undo-history changes so far, and their count at the last save or open. */
   edits: number
   savedEdits: number
+  /** Set by `--open --export-to` / open_document exportTo: every save also writes this PNG. */
+  exportTo?: ExportTarget
 }
 
 const EDIT_EVENTS: ReadonlySet<HistoryEvent['type']> = new Set(['execute', 'undo', 'redo', 'clear', 'transaction-commit'])
