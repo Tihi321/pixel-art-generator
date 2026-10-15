@@ -75,4 +75,4 @@ Tools run in the Electron main process, not in a hidden window. `src/main/toolBr
 - WebP decoding (unsupported).
 - Orphan cleanup, outline and dither choices are judged on one real image (checked by eye) and the synthetic fixtures; there is no pixel-art quality benchmark.
 
-**Commit status:** not committed.
+**Commit status:** committed on `PAR-05_vn-studio-art` (2ddfe83); not pushed. Remaining work: visual-novels-orchestrator `.claude/tickets/VNO-02-chiptune-and-pixel-studio/next-steps.md`.
