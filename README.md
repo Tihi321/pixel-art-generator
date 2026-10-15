@@ -11,6 +11,21 @@ yarn typecheck && yarn lint
 yarn gen:guide  # regenerate src/tools/guideText.ts after editing docs/llm-guide.md
 ```
 
+## Building the .exe (Windows)
+
+```
+yarn dist            # both: installer + portable exe, in dist/
+yarn dist:installer  # only dist/Pixel-Studio-Setup-<version>.exe
+yarn dist:portable   # only dist/Pixel-Studio-<version>-portable.exe
+yarn dist:dir        # only dist/win-unpacked/ (no packaging, fastest, for testing)
+```
+
+- **Installer** (`Pixel-Studio-Setup-<version>.exe`): one-click, per-user install (no admin), adds Start menu and desktop shortcuts, installs to `%LOCALAPPDATA%\Programs\Pixel Studio`. The best choice for MCP clients, since the stdio shim then has a stable path (`resources\app\out\mcp-stdio\index.js` next to the exe).
+- **Portable** (`Pixel-Studio-<version>-portable.exe`): a single exe, nothing installed. It unpacks to a temp folder on every launch (a few seconds), so the stdio shim path changes between runs; use the HTTP MCP endpoint with it.
+- `dist/win-unpacked/Pixel Studio.exe` runs as-is too.
+
+The version comes from `package.json`. The icon is `build/icon.png` (`yarn gen:icon` redraws it from the sprite in `scripts/gen-icon.mjs`). Builds are not code-signed, so Windows SmartScreen shows "Windows protected your PC" on first run: click **More info > Run anyway**.
+
 ## MCP server
 
 The app serves MCP (Streamable HTTP) at `http://127.0.0.1:7457/mcp` while its window is open (port and optional bearer token in Settings > MCP). A stdio shim for clients that only speak stdio is built to `out/mcp-stdio/index.js`. The tools are described in [docs/llm-guide.md](docs/llm-guide.md).

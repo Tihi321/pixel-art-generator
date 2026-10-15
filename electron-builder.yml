@@ -1,4 +1,5 @@
-# Windows installer (NSIS, per user, x64). Build it with `yarn dist`.
+# Windows builds (x64): an NSIS installer (per user) and a portable single .exe. Build both with `yarn dist`.
+# The app icon is build/icon.png (regenerate with `yarn gen:icon`).
 appId: com.tihi321.pixel-studio
 productName: Pixel Studio
 copyright: Pixel Studio
@@ -18,12 +19,18 @@ extraResources:
   - from: docs
     to: docs
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
-  artifactName: Pixel-Studio-Setup-${version}.${ext}
+    - target: portable
+      arch: [x64]
 nsis:
+  artifactName: Pixel-Studio-Setup-${version}.${ext}
   oneClick: true
   perMachine: false
   runAfterFinish: true
   deleteAppDataOnUninstall: false
+# Unpacks itself to a temp folder on every launch; settings and files still live in the user profile.
+portable:
+  artifactName: Pixel-Studio-${version}-portable.${ext}
