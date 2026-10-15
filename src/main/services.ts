@@ -91,6 +91,7 @@ export interface NodeServices {
   listUserPalettes(): Promise<UserPaletteInfo[]>
   saveUserPalette(palette: Palette): Promise<UserPaletteInfo & { path: string }>
   loadUserPalette(idOrName: string): Promise<Palette | null>
+  decodeImage?(bytes: Uint8Array): Promise<{ width: number; height: number; data: Uint32Array }> | { width: number; height: number; data: Uint32Array }
 }
 
 export function createNodeServices(root: string = defaultRoot()): NodeServices {
@@ -162,6 +163,10 @@ export function createNodeServices(root: string = defaultRoot()): NodeServices {
 export function registerServices(ipc: BridgeIpc, services: NodeServices = createNodeServices()): NodeServices {
   ipc.handle(IPC.fsWriteFile, (_e, path, data) => services.writeFile(String(path), data as Uint8Array | string))
   ipc.handle(IPC.fsReadFile, (_e, path) => services.readFile(String(path)))
+  ipc.handle(IPC.fsDecodeImage, (_e, bytes) => {
+    if (!services.decodeImage) throw new Error('This app cannot decode images other than PNG.')
+    return services.decodeImage(bytes as Uint8Array)
+  })
   ipc.handle(IPC.fsResolveExportPath, (_e, name, dir) => services.resolveExportPath(String(name), typeof dir === 'string' ? dir : undefined))
   ipc.handle(IPC.fsResolveProjectPath, (_e, name, dir) => services.resolveProjectPath(String(name), typeof dir === 'string' ? dir : undefined))
   ipc.handle(IPC.palettesList, () => services.listUserPalettes())

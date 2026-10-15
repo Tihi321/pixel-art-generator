@@ -25,6 +25,7 @@ export const IPC = {
   // ToolServices implemented by main (renderer -> main, invoke)
   fsWriteFile: 'fs:writeFile',
   fsReadFile: 'fs:readFile',
+  fsDecodeImage: 'fs:decodeImage',
   fsResolveExportPath: 'fs:resolveExportPath',
   fsResolveProjectPath: 'fs:resolveProjectPath',
   palettesList: 'palettes:list',

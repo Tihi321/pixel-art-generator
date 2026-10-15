@@ -3,16 +3,19 @@
 
 import { z } from 'zod'
 import type { ToolDef, ToolHost, ToolResult, TurnToolHost } from '../shared/tools'
+import type { DocumentHost } from './documents'
 import type { EditorSession } from './session'
 import type { ToolServices } from './services'
 
 export type { ToolDef, ToolHost, ToolResult, TurnToolHost }
 
-export type ToolGroup = 'document' | 'layers' | 'frames' | 'drawing' | 'reading' | 'palette' | 'assets' | 'export' | 'history'
+export type ToolGroup = 'document' | 'layers' | 'frames' | 'drawing' | 'reading' | 'palette' | 'assets' | 'export' | 'history' | 'documents'
 
 export interface ToolContext {
   session: EditorSession
   services: ToolServices
+  /** The open documents (multi-document hosts). `session` is the current one. Absent in single-document hosts. */
+  documents?: DocumentHost
   signal?: AbortSignal
 }
 

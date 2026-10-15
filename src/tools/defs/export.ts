@@ -12,10 +12,11 @@ import {
   frameIndex,
   requireLayer,
   requireTag,
-  scaleImage,
   sheetMetadata
 } from '../../core'
+import { resolveDocument, writeDocumentPng } from '../documents'
 import { defineTool } from '../registry'
+import { withJson } from './studio'
 import { FRAME_REF_DESC, LAYER_REF_DESC, baseName, frameRef, layerRef, obj, ok, plural, resolveFrame, safeFileName, withExtension } from '../util'
 
 const PATH_DESC =
@@ -48,37 +49,39 @@ export const exportTools = [
     group: 'export',
     readOnly: true,
     description:
-      'Export the artwork as PNG file(s): the current (or given) frame, or every frame ("all": one file per frame, named <name>_0.png, <name>_1.png, ...). Layers are flattened (hidden layers skipped) and optionally upscaled with nearest-neighbour. Returns the written path(s). For game sprite sheets use export_spritesheet instead.',
+      'Export the artwork as PNG file(s): the current (or given) frame, or every frame ("all": one file per frame, named <name>_0.png, <name>_1.png, ...). Layers are flattened (hidden and reference layers skipped) and scaled with nearest-neighbour: either an integer `scale`, or an exact `width` x `height` (any ratio, e.g. a 320x180 document exported at 1920x1080; with both given they override scale; with only one the aspect ratio is kept). `document` picks a document other than the current one (see list_documents). Returns the written path(s) as text and as JSON {paths,width,height}. For game sprite sheets use export_spritesheet instead.',
     input: obj({
       path: z.string().min(1).optional().describe(PATH_DESC),
+      document: z.string().optional().describe('documentId (see list_documents). Default: the current document.'),
       frames: z.enum(['current', 'all']).optional().describe('"current" (default): one frame. "all": every frame as a separate file.'),
       frame: frameRef(`${FRAME_REF_DESC} Used when frames is "current". Default: the active frame.`).optional(),
-      scale: z.number().int().min(1).max(32).optional().describe('Integer upscale factor (default 1).'),
+      scale: z.number().int().min(1).max(32).optional().describe('Integer upscale factor (default 1). Ignored when width and height are given.'),
+      width: z.number().int().min(1).max(8192).optional().describe('Exact output width in pixels (nearest neighbour, need not be a multiple of the document width).'),
+      height: z.number().int().min(1).max(8192).optional().describe('Exact output height in pixels.'),
       layers: layersArg
     }),
-    handler: async (args, { session, services }) => {
+    handler: async (args, ctx) => {
+      const { services } = ctx
+      const target = resolveDocument(ctx, args.document)
+      const session = target.session
       const doc = session.doc
-      const scale = args.scale ?? 1
       const fo = flattenOptions(doc, args.layers)
-      const render = (frameId: string): Uint8Array => {
-        const img = scaleImage({ width: doc.width, height: doc.height, data: flattenFrame(doc, frameId, fo) }, scale)
-        return encodePng(img)
-      }
+      const size = { width: args.width, height: args.height, scale: args.scale }
       const name = withExtension(args.path ?? safeFileName(doc.name), 'png')
       if (args.frames === 'all') {
         const written: string[] = []
         const stem = name.replace(/\.png$/i, '')
+        let dims = { width: doc.width, height: doc.height }
         for (let i = 0; i < doc.frames.length; i++) {
-          const full = await services.resolveExportPath(`${stem}_${i}.png`)
-          await services.writeFile(full, render(doc.frames[i]!.id))
-          written.push(full)
+          const r = await writeDocumentPng(session, services, `${stem}_${i}.png`, { ...size, ...fo, frame: i })
+          written.push(r.path)
+          dims = r
         }
-        return ok(`Exported ${plural(written.length, 'frame')} as PNG (${doc.width * scale}x${doc.height * scale} px each):\n${written.join('\n')}`)
+        return withJson(`Exported ${plural(written.length, 'frame')} as PNG (${dims.width}x${dims.height} px each):\n${written.join('\n')}`, { paths: written, width: dims.width, height: dims.height })
       }
       const frame = resolveFrame(session, args.frame)
-      const full = await services.resolveExportPath(name)
-      await services.writeFile(full, render(frame.id))
-      return ok(`Exported frame ${frameIndex(doc, frame.id)} as PNG (${doc.width * scale}x${doc.height * scale} px) to ${full}.`)
+      const r = await writeDocumentPng(session, services, name, { ...size, ...fo, frame: frame.id })
+      return withJson(`Exported frame ${frameIndex(doc, frame.id)} as PNG (${r.width}x${r.height} px) to ${r.path}.`, { paths: [r.path], width: r.width, height: r.height })
     }
   }),
 
