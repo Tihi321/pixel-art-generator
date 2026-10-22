@@ -77,6 +77,18 @@ Never draw letters by hand. `draw_text {text, x, y, color, font?, align?, maxWid
 Example: `draw_text {"text":"Chapter 1
 The Lake","x":60,"y":20,"color":"#fff1e8","font":"small","scale":2,"align":"center","maxWidth":200,"outline":"#1a1c2c"}`.
 
+## UI for visual novels
+
+A VN needs a textbox, a name box, choice buttons and panels as PNGs. Ren'Py draws them with `Frame("file.png", left, top, right, bottom)`: the borders keep their size and the middle stretches or tiles, so one small image fits any size.
+
+- `draw_ui_element {kind, x, y, w, h, style?, state?, label?, font?, labelColor?, align?}` draws one. `kind` is "textbox", "namebox" (a tab: top corners only), "button", "choice" (a wide button), "panel" or "frame" (border only). With just kind and a rectangle it already fits the palette (darkest color = border, a neutral mid color = fill, neighbouring colors = bevel, the lightest or darkest color for the label by contrast). Optional `style`: `fill, border, light, dark, shadow, corner` ("round" default, "cut", "square"), `borderWidth` 1-4, `inset` (inner line), `pattern` ("dither", "stripes").
+- Buttons and choices take `state`: "idle", "hover" (lighter fill), "pressed" (darker, bevel inverted, label 1 px down), "disabled" (grey, no bevel). Draw all four at the same size. `label` uses the built-in fonts: centered on buttons and name boxes, top-left and wrapped on a textbox or panel.
+- The result gives the 9-slice borders `{left, top, right, bottom}`, a ready `Frame("textbox.png", 6, 6, 6, 6)` line and the same as JSON. Use those numbers; they are measured from the drawing.
+- Workflow: one document per element (a textbox 320x64, a name box 64x20, buttons 96x24 on frames 0-3 or one sheet), then `export_png` (or `export_many`) with the matching file name, and put the reported borders into the Ren'Py `Frame(...)`.
+- `draw_nine_slice {source:{x,y,w,h}, insets, x, y, w, h, center?, edges?}` resizes a hand-drawn frame: corners are copied 1:1, edges and middle `"tile"` (default; keeps the pixel pattern) or `"stretch"`. `insets` is one number or `{left,top,right,bottom}`. The source may be on another layer, frame or `document`.
+
+Example: `draw_ui_element {"kind":"choice","x":0,"y":0,"w":160,"h":22,"label":"Go to the beach","state":"hover"}`, then the same call with "pressed".
+
 ## Palette and colour rules
 
 - Use only colours from the document palette. A colour can be given as a hex string, a palette index (`8` or `"p8"`), a palette colour name or "transparent".

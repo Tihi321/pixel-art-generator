@@ -55,6 +55,8 @@ Set `PIXEL_STUDIO_MCP_PORT` for the port and `PIXEL_STUDIO_MCP_TOKEN` for a bear
 | `draw_sprite_from_reference` | A new document with a hidden reference layer and drawing guidance, for an agent to draw a small sprite with `draw_grid`. |
 | `make_expression_set` | Turns a drawn sprite document into an expression set: one frame per expression (a copy of the base pose), each tagged with the expression name, so `{"frame":"happy"}` works in every drawing tool. Returns what to change on the face per expression. One undo step. |
 | `export_expression_set` | One transparent PNG per expression, `<dir>/<prefix>_<expression>.png`, all at the same (optionally exact) size. |
+| `draw_ui_element` | Pixel UI for a visual novel: textbox, name box, button, choice, panel or frame, in the document palette by default (corners round/cut/square, bevel, shadow, dither, inner line). Buttons have idle/hover/pressed/disabled states and a label in the built-in fonts. Reports the 9-slice borders and a Ren'Py `Frame(...)` line. |
+| `draw_nine_slice` | Resizes a hand-drawn frame or panel to any size: corners copied 1:1, edges and middle tiled (or stretched). |
 | `list_documents`, `open_document`, `save_document`, `select_document`, `close_document` | Document handling and the round trip below. |
 
 The new and changed tools end their result with one JSON text item (see `.claude/tickets/PAR-05-vn-studio-art/plan.md` and the VNO-02 contract). Image decoding: PNG always; JPEG, WebP, GIF (first frame), BMP and AVIF only through Electron (nativeImage, then a hidden Chromium decoder window; the app and headless mode), not in plain Node.
