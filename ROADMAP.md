@@ -6,11 +6,7 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 
 - Headless MCP on `127.0.0.1:7457/mcp` (`--mcp-only`), used by VN Studio for pixel conversion and drawing. VN Studio's VNO-08 added a `grid` draw mode (one call per sprite), so the client provider can draw without a per-turn timeout.
 
-## Drawing
-
-- **No pixel font.** There is no bitmap-text tool, so lettering (titles, labels, speech bubbles) has to be drawn by hand. Wanted: a tiny built-in pixel font and a `draw_text` tool (PAR-11).
-
 ## Visual novel assets
 
 - No expression-set tool (VN Studio has expression sets per book and character since VNO-08).
-- No text, 9-slice or UI-element support (textbox, buttons).
+- No 9-slice or UI-element support (textbox, buttons).

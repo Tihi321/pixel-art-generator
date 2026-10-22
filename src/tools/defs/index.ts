@@ -9,14 +9,16 @@ import { layerTools } from './layers'
 import { paletteTools } from './palette'
 import { readingTools } from './reading'
 import { studioTools } from './studio'
+import { textTools } from './text'
 
-export { assetTools, documentTools, drawingTools, exportTools, frameTools, historyTools, layerTools, paletteTools, readingTools, studioTools }
+export { assetTools, documentTools, drawingTools, exportTools, frameTools, historyTools, layerTools, paletteTools, readingTools, studioTools, textTools }
 
 export const allTools = [
   ...documentTools,
   ...layerTools,
   ...frameTools,
   ...drawingTools,
+  ...textTools,
   ...readingTools,
   ...paletteTools,
   ...assetTools,

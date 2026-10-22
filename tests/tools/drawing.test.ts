@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { bytesToBase64, celKey, createRaster, encodePng, getPixel, hexToRgba, packRgba } from '../../src/core'
 import { resultText } from '../../src/tools'
-import { setup } from './helpers'
+import { jsonOf, setup } from './helpers'
 
 function pngOf(w: number, h: number, fn: (x: number, y: number) => number): Uint8Array {
   const data = new Uint32Array(w * h)
@@ -131,5 +131,42 @@ describe('draw_grid limit', () => {
     expect(px(t, 200, 99)).toBe(0)
     expect((await t.call('draw_grid', { rows: ['1'.repeat(257)] })).isError).toBe(true)
     expect((await t.call('draw_grid', { rows: Array.from({ length: 257 }, () => '1') })).isError).toBe(true)
+  })
+})
+
+describe('draw_text and measure_text', () => {
+  it('measure_text predicts the box draw_text writes', async () => {
+    const t = setup({ width: 64, height: 32 })
+    const m = jsonOf(await t.ok('measure_text', { text: 'HIH', font: 'small', scale: 2 }))
+    expect(m['width']).toBe((5 + 3 + 5 + 2) * 2)
+    expect(m['height']).toBe(9 * 2)
+    expect(m['lines']).toEqual([{ text: 'HIH', width: 30 }])
+    const text = resultText(await t.ok('draw_text', { text: 'HIH', x: 2, y: 3, color: '#ff0000', font: 'small', scale: 2 }))
+    expect(text).toContain('Text box 30x18 at (2,3), 1 line.')
+    expect(text).toContain('x=2, y=3, w=30, h=14')
+    expect(px(t, 2, 3)).toBe(RED)
+  })
+
+  it('wraps, aligns and counts unknown characters', async () => {
+    const t = setup({ width: 64, height: 32 })
+    const m = jsonOf(await t.ok('measure_text', { text: 'aa bb cc €', font: 'tiny', maxWidth: 12 }))
+    expect((m['lines'] as unknown[]).length).toBeGreaterThan(1)
+    expect(m['unknownChars']).toBe(1)
+    const r = resultText(await t.ok('draw_text', { text: 'A\nAAA', x: 0, y: 0, color: 1, font: 'tiny', align: 'right', maxWidth: 20 }))
+    expect(r).toContain('Text box 20x11 at (0,0), 2 lines.')
+    expect(resultText(await t.ok('draw_text', { text: '€', x: 0, y: 20, color: 1, font: 'tiny' }))).toContain('1 character not in the font')
+  })
+
+  it('draws an outline and a shadow in one undo step, and validates arguments', async () => {
+    const t = setup({ width: 32, height: 16 })
+    const d0 = t.session.history.undoDepth
+    await t.ok('draw_text', { text: 'I', x: 4, y: 4, color: '#ff0000', font: 'tiny', outline: '#0000ff', shadow: { color: '#00ff00', dx: 2, dy: 2 } })
+    expect(t.session.history.undoDepth).toBe(d0 + 1)
+    expect(px(t, 4, 4)).toBe(RED)
+    expect(px(t, 3, 3)).toBe(BLUE)
+    expect(px(t, 6, 10)).toBe(GREEN)
+    expect((await t.call('draw_text', { text: '', x: 0, y: 0, color: 1 })).isError).toBe(true)
+    expect((await t.call('draw_text', { text: 'x', x: 0, y: 0, color: 1, scale: 9 })).isError).toBe(true)
+    expect((await t.call('draw_text', { text: 'x'.repeat(2001), x: 0, y: 0, color: 1 })).isError).toBe(true)
   })
 })

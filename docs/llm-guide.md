@@ -7,7 +7,7 @@ Pixel Studio quick guide
 - Canvas: origin (0,0) is top-left, x goes right, y goes down. Layers and frames are addressed by id, name or 0-based index. Edits go to the active layer and frame unless `layer` / `frame` are given.
 - Workflow: `get_document` -> pick a palette (`list_palettes`, `load_palette`, `set_palette`) -> sketch the silhouette with `draw_grid` -> shade -> outline -> `render_preview` -> fix -> export.
 - `draw_grid`: rows of text, one character per pixel, plus a legend {char: "#hex" | palette index | null}. Max 256x256 per call; use x,y to place it. `read_grid` returns pixels in the same format.
-- Big scenes: `draw_gradient` (sky), `draw_polygon {filled:true}` (hills; not line + flood_fill), `draw_image` (a whole PNG at once).
+- Big scenes: `draw_gradient` (sky), `draw_polygon {filled:true}` (hills), `draw_image` (a PNG). Text: `draw_text`, `measure_text`.
 - Use only palette colours and hue-shifted ramps (shadows cooler, highlights warmer). Keep sprites small.
 - Animation: `duplicate_frame`, edit only the differences, keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8); `set_frame_duration` in ms.
 - References: if `get_document` lists `references`, call `get_style_context` first and use exactly its palette. Library: `list_assets`, `place_asset`, `save_as_asset`.
@@ -63,6 +63,19 @@ A 320x180 background should take a handful of calls, not hundreds of grids.
 - `draw_image {png | path, x?, y?, transparent?, snap?, dither?}`: paints a whole base64 PNG (or an image file) at once, for example a foreground you composed in code. Alpha is binary (>= 128 is opaque). `snap:"palette"` remaps to the document palette; otherwise the result tells you how many colors are outside it.
 
 Example sequence for a 320x180 scene on separate layers: `new_document {"width":320,"height":180,"palette":"db32"}`, then `draw_gradient` for the sky (ordered dither), three `draw_polygon` calls with `filled:true` for hills from far (light) to near (dark), and `draw_image` for the foreground. Check with `render_preview` or `export_png`.
+
+## Text
+
+Never draw letters by hand. `draw_text {text, x, y, color, font?, align?, maxWidth?, letterSpacing?, lineSpacing?, scale?, outline?, shadow?}` writes crisp pixel text with its top-left at (x, y) on the active layer or the given `layer`/`frame`.
+
+- Fonts: "small" (default) has 5x7 capitals, real lowercase with descenders and a 10 px line pitch; "tiny" has 3x5 letters with a 6 px line pitch and no lowercase (it draws small caps), for labels on small canvases. Both cover printable ASCII; accented Latin letters draw as their base letter and any other character as a hollow box (the result says how many).
+- `
+` starts a new line. `maxWidth` wraps at spaces (in canvas pixels); `align` "center" or "right" places lines inside `maxWidth` (or the widest line). `scale` 1-8 enlarges the font in whole pixels (a title at scale 2-3 stays crisp). `letterSpacing` (default 1) and `lineSpacing` are in font pixels.
+- `outline` is a color for a one-font-pixel outline, `shadow` is `{color, dx?, dy?}`; both keep the text readable on busy backgrounds. Use palette colors.
+- `measure_text` takes the same text options and returns `{width, height, lines}` without drawing. Center a title with `x = (canvas width - width) / 2`.
+
+Example: `draw_text {"text":"Chapter 1
+The Lake","x":60,"y":20,"color":"#fff1e8","font":"small","scale":2,"align":"center","maxWidth":200,"outline":"#1a1c2c"}`.
 
 ## Palette and colour rules
 

@@ -196,6 +196,6 @@ describe('ToolBridge', () => {
   })
 
   it('advertises the default registry tools when none are injected', () => {
-    expect(new ToolBridge().tools().length).toBe(65)
+    expect(new ToolBridge().tools().length).toBe(67)
   })
 })
