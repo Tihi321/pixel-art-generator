@@ -59,6 +59,48 @@ describe('headless MCP', () => {
     }
   })
 
+  it('two clients draw into two documents by id and export both', async () => {
+    const h = await startHeadless({ port: 0, services: createNodeServices(join(root, 'home-two')) })
+    const connect = async () => {
+      const c = new Client({ name: 'test', version: '1.0.0' })
+      await c.connect(new StreamableHTTPClientTransport(new URL(h.url!)))
+      return c
+    }
+    const c1 = await connect()
+    const c2 = await connect()
+    try {
+      const call = async (client: Client, name: string, args: Record<string, unknown>) => {
+        const r = await client.callTool({ name, arguments: args })
+        expect(r.isError, JSON.stringify(r.content)).toBeFalsy()
+        const content = r.content as Array<{ type: string; text: string }>
+        return JSON.parse(content[content.length - 1]!.text) as Record<string, unknown>
+      }
+      const draw = async (client: Client, args: Record<string, unknown>) => {
+        const r = await client.callTool({ name: 'draw_rect', arguments: args })
+        expect(r.isError, JSON.stringify(r.content)).toBeFalsy()
+      }
+      const a = (await call(c1, 'new_document', { width: 8, height: 8, name: 'one' }))['documentId'] as string
+      const b = (await call(c2, 'new_document', { width: 8, height: 8, name: 'two' }))['documentId'] as string
+      expect(a).not.toBe(b)
+      // b is current now, but client 1 keeps drawing into a
+      await draw(c1, { document: a, x: 0, y: 0, w: 8, h: 8, color: '#ff0000', filled: true })
+      await draw(c2, { document: b, x: 0, y: 0, w: 8, h: 8, color: '#0000ff', filled: true })
+      const outA = join(root, 'two', 'a.png')
+      const outB = join(root, 'two', 'b.png')
+      await call(c1, 'export_many', { items: [{ document: a, path: outA }, { document: b, path: outB }] })
+      const pa = decodePng(new Uint8Array(await readFile(outA)))
+      const pb = decodePng(new Uint8Array(await readFile(outB)))
+      expect(pa.data[0]).toBe(packRgba(255, 0, 0))
+      expect(pb.data[0]).toBe(packRgba(0, 0, 255))
+      const list = (await call(c2, 'list_documents', {}))['documents'] as Array<{ documentId: string }>
+      expect(list.map((d) => d.documentId)).toEqual([a, b])
+    } finally {
+      await c1.close().catch(() => undefined)
+      await c2.close().catch(() => undefined)
+      await h.stop()
+    }
+  })
+
   it('reports a port that is taken instead of throwing', async () => {
     const first = await startHeadless({ port: 0, services: createNodeServices(join(root, 'h2')) })
     const port = Number(new URL(first.url!).port)

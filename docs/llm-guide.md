@@ -11,7 +11,7 @@ Pixel Studio quick guide
 - Animation: `duplicate_frame`, then edit only the differences; keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8, attack 3-6); `set_frame_duration` in ms.
 - References: if `get_document` lists `references`, call `get_style_context` first and use exactly its palette. Library: `list_assets`, `place_asset`, `save_as_asset`.
 - Export: `export_png` (`width`+`height` = exact size), `export_spritesheet`, `export_gif`. `undo` / `redo` fix mistakes.
-- Images: `import_image` makes pixel art from a PNG in a new document (`list_documents`, `document` ids).
+- Images: `import_image` makes pixel art from a PNG in a new document. Several documents: every tool takes an optional `document` id (`list_documents`); `new_document` adds one.
 - Errors come back as text: read them and correct the call.
 <!-- short:end -->
 
@@ -86,7 +86,7 @@ The asset library holds finished art (kinds: character, background, tile, prop),
 
 ## Several documents, images and VN Studio
 
-Pixel Studio can hold several documents at once (tabs in the window, an in-memory set when it runs headless). Every document has a `documentId`; `list_documents` shows them. All drawing tools work on the **current** document, and tools that create a document (`import_image`, `draw_sprite_from_reference`, `open_document`) make the new one current. `export_png` and `export_many` take a `document` id, so you can export an earlier one without switching.
+Pixel Studio can hold several documents at once (tabs in the window, an in-memory set when it runs headless). Every document has a `documentId`; `list_documents` shows them. Documents are independent: `new_document`, `open_project`, `open_document`, `import_image` and `draw_sprite_from_reference` ADD a document (it becomes the current one) and never replace another. **Every tool that works on a document takes an optional `document` id** (default: the current document). When several clients or agents work at once, pass `document` on every call, because another client may have made a different document current in the meantime. `select_document {document}` makes a document current; `close_document {document, force?}` closes one (a document with unsaved changes needs `force` or a `save_document` first; closing the last one leaves a blank 32x32 document). `new_document` returns the `documentId` in its JSON item.
 
 - `import_image {path, width, height, palette, dither, outline, cleanup}`: converts a PNG (or JPEG when the app can decode it) to clean pixel art in a new document: area-average downscale that respects transparency, alpha threshold, snap to the palette (`none`, `ordered` or `floyd` dithering; transparent pixels are never dithered), removal of orphan single pixels, optional 1 px `outline` (`true` = the darkest palette colour, or a hex colour). Without `palette`, `maxColors` (default 32) colours are picked from the image. Max 512x512. Example: `{"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}`.
 - `export_png {width, height}`: an exact output size with nearest-neighbour scaling, not only integer factors. A 320x180 document exported at `1920x1080` is a clean 6x. `export_many {items:[{document, path, width, height, frame}]}` writes several files in one call.

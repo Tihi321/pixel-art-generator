@@ -27,9 +27,9 @@ import {
   MAX_IMPORT_SIDE
 } from '../../core'
 import type { ToolResult } from '../../shared/tools'
-import { type ExportTarget, exportToTarget, resolveDocument, writeDocumentPng } from '../documents'
+import { type ExportTarget, addDocument, exportToTarget, resolveDocument, writeDocumentPng } from '../documents'
 import { type ToolContext, defineTool, textResult } from '../registry'
-import { findPalette, obj, paletteNotFound, pathStem, plural, safeFileName, withExtension } from '../util'
+import { DOCUMENT_DESC, findPalette, obj, paletteNotFound, pathStem, plural, safeFileName, withExtension } from '../util'
 
 /** Human text first, then one JSON object as the LAST content item (the VN Studio contract). */
 export function withJson(text: string, json: Record<string, unknown>): ToolResult {
@@ -73,19 +73,13 @@ function describeSize(doc: Document): string {
   return `${doc.width}x${doc.height}`
 }
 
-/** Adds a document to the host (it becomes current); without a host it replaces the single document. */
-function addDocument(ctx: ToolContext, doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}): string {
-  if (ctx.documents) return ctx.documents.add(doc, opts)
-  ctx.session.replaceDocument(doc, { label: `Open ${doc.name}` })
-  return ctx.session.doc.id
-}
-
 const pngSafeName = (name: string): string => safeFileName(name)
 
 export const studioTools = [
   defineTool({
     name: 'import_image',
     group: 'documents',
+    document: false,
     readOnly: true,
     description:
       `Turn an image file (PNG always; JPEG/WebP when the app can decode them) into a pixel-art document: area-average downscale (alpha-aware, so transparent backgrounds do not bleed into the edges) -> alpha threshold -> remap to a palette with optional dithering (transparent pixels are never dithered) -> orphan-pixel cleanup -> optional 1 px outline. The result is a NEW document with one pixel layer, and it becomes the current document. Max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}. ` +
@@ -148,6 +142,7 @@ export const studioTools = [
   defineTool({
     name: 'export_many',
     group: 'export',
+    document: false,
     readOnly: true,
     description:
       'Export several PNGs in one call. Each item: {document?, path, width?, height?, scale?, frame?}: the document (default current), the output path (absolute, or a file name for ~/PixelStudio/exports), an exact size (width and height, nearest neighbour, any ratio) or an integer scale, and the frame (default active). Returns the written paths as text and as JSON {paths}. Example: {"items":[{"document":"doc2","path":"C:/out/bg.png","width":1920,"height":1080}]}.',
@@ -155,7 +150,7 @@ export const studioTools = [
       items: z
         .array(
           obj({
-            document: z.string().optional().describe('documentId (see list_documents). Default: the current document.'),
+            document: z.string().optional().describe(DOCUMENT_DESC),
             path: z.string().min(1).describe('Output path.'),
             width: z.number().int().min(1).optional().describe('Exact output width in pixels.'),
             height: z.number().int().min(1).optional().describe('Exact output height in pixels.'),
@@ -184,6 +179,7 @@ export const studioTools = [
   defineTool({
     name: 'draw_sprite_from_reference',
     group: 'documents',
+    document: false,
     readOnly: true,
     description:
       'Prepare a small sprite (up to 128x128, typically 64x96) that YOU then draw from a reference image: creates a new document of that size with the given palette, adds the reference downscaled to fit as a dimmed, locked REFERENCE layer (never exported), and returns drawing guidance. Draw on the "Sprite" layer with draw_grid (max 64x64 per call), look with render_preview, then export_png. The new document becomes current. Returns text plus JSON {documentId,name,width,height,palette,referenceLayerId}.',
@@ -227,6 +223,7 @@ export const studioTools = [
   defineTool({
     name: 'list_documents',
     group: 'documents',
+    document: false,
     readOnly: true,
     description: 'List the open documents: documentId, name, size, the project path (null until saved), whether it is the current one and whether it has unsaved changes. Returns text and JSON {documents}.',
     input: obj({}),
@@ -240,8 +237,42 @@ export const studioTools = [
   }),
 
   defineTool({
+    name: 'select_document',
+    group: 'documents',
+    readOnly: true,
+    description: 'Make a document the current one (the default target of every tool call without `document`; in the window app its tab comes to the front). Returns text and JSON {documentId,name,width,height}.',
+    input: obj({ document: z.string().min(1).describe('documentId (see list_documents).') }),
+    handler: (args, ctx) => {
+      const documentId = ctx.documentId ?? args.document
+      ctx.documents?.activate(documentId)
+      const d = ctx.session.doc
+      return withJson(`Document ${documentId} ("${d.name}" ${describeSize(d)}) is now the current document.`, { documentId, name: d.name, width: d.width, height: d.height })
+    }
+  }),
+
+  defineTool({
+    name: 'close_document',
+    group: 'documents',
+    readOnly: true,
+    description:
+      'Close a document. A document with unsaved changes is refused unless force=true: save_document it first to keep it. If it was the current one, the most recently added remaining document becomes current; closing the last one leaves a blank 32x32 document. Returns text and JSON {documentId,closed,current} (current = the documentId that is current now).',
+    input: obj({
+      document: z.string().min(1).describe('documentId (see list_documents).'),
+      force: z.boolean().optional().describe('Close even with unsaved changes (they are lost). Default false.')
+    }),
+    handler: (args, ctx) => {
+      if (!ctx.documents) throw new Error('This host has a single document, it cannot be closed.')
+      const documentId = ctx.documentId ?? args.document
+      ctx.documents.close(documentId, { force: args.force })
+      const current = ctx.documents.list().find((d) => d.current)?.documentId ?? null
+      return withJson(`Closed document ${documentId}. Current document: ${current ?? 'none'}.`, { documentId, closed: true, current })
+    }
+  }),
+
+  defineTool({
     name: 'open_document',
     group: 'documents',
+    document: false,
     readOnly: true,
     description:
       'Open a Pixel Studio project (.pxs) or an image (PNG; a PNG opens as a new one-layer document at its pixel size) and make it the current document. With exportTo, the app writes a PNG there (optionally scaled to exportWidth x exportHeight, nearest neighbour) every time the document is saved (save_document, Ctrl+S): that is how an edit in the editor flows back to VN Studio. In the window app the document shows in a new tab. Returns text and JSON {documentId,name,width,height,path}.',
@@ -295,7 +326,7 @@ export const studioTools = [
     description:
       'Save a document as a Pixel Studio project (.pxs). Defaults: the current document, and the path it was opened from or last saved to (else ~/PixelStudio/projects/<name>.pxs). When the document was opened with exportTo, the PNG is exported there too. Returns text and JSON {documentId,path,exported?}.',
     input: obj({
-      document: z.string().optional().describe('documentId (see list_documents). Default: the current document.'),
+      document: z.string().optional().describe(DOCUMENT_DESC),
       path: z.string().min(1).optional().describe('Absolute path or file name (".pxs" is added if missing).')
     }),
     handler: async (args, ctx) => {

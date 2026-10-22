@@ -8,8 +8,6 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 
 ## Documents and sessions
 
-- **One current document, shared by every client.** `render_preview` and every drawing tool act on it, so two agents drawing at once overwrite each other (the hub's `scripts/pxcanvas.py` takes a file lock). Tools should take a `document` id the way `export_png` does.
-- `new_document` replaces the current document, and no tool switches the current document.
 - `import_image` caps at 512x512 and reads no WebP.
 - **Opening the app while the headless engine runs** (VN Studio's "Open in Pixel Studio", or a double-click) can fail with no message while the headless studio holds `engine.lock` (found while planning hub HUB-08, 2026-10-22). It should say so, or attach to the running engine.
 

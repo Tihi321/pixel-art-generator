@@ -31,6 +31,8 @@ import type { EditorSession } from './session'
 /** Strict object: unknown argument names are reported instead of silently ignored. */
 export const obj = z.strictObject
 
+/** The `document` argument every document tool accepts. */
+export const DOCUMENT_DESC = 'documentId (see list_documents). Default: the current document.'
 export const LAYER_REF_DESC = 'Layer id, exact name, or 0-based index (0 = bottom layer).'
 export const FRAME_REF_DESC = 'Frame id or 0-based index (0 = first frame).'
 export const COLOR_DESC =

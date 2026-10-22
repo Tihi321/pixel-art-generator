@@ -53,7 +53,15 @@ export interface DocumentHost {
   setExportTarget(documentId: string, target: ExportTarget | undefined): void
   /** The document was saved to `path`: remember it and clear the dirty flag. */
   markSaved(documentId: string, path: string): void
+  /**
+   * Closes a document. A document with unsaved changes needs `force`. Closing the current one makes another
+   * current; closing the last one leaves a fresh blank document. Throws when the document cannot be closed.
+   */
+  close(documentId: string, opts?: { force?: boolean }): void
 }
+
+export const UNSAVED_CLOSE_MESSAGE = (documentId: string, name: string): string =>
+  `Document ${documentId} ("${name}") has unsaved changes. Call save_document first, or pass force=true to close it anyway.`
 
 // ---------------------------------------------------------------- DocumentSet (headless)
 
@@ -154,9 +162,27 @@ export class DocumentSet implements DocumentHost {
     e.path = path
     e.savedEdits = e.edits
   }
+
+  close(documentId: string, opts: { force?: boolean } = {}): void {
+    const e = this.resolve(documentId) as Entry
+    if (e.edits !== e.savedEdits && !opts.force) throw new Error(UNSAVED_CLOSE_MESSAGE(e.documentId, e.session.doc.name))
+    if (e.session.turnActive) throw new Error(`Document ${e.documentId} is in use by an agent turn and cannot be closed now.`)
+    const wasCurrent = e === this.current()
+    this.entries = this.entries.filter((x) => x !== e)
+    // the most recently added remaining document becomes current; the last one leaves a blank placeholder
+    if (this.entries.length === 0) this.addEntry(createDocument({ width: 32, height: 32, name: 'Untitled' }), null, undefined, true)
+    else if (wasCurrent) this.currentIdValue = this.entries[this.entries.length - 1]!.documentId
+  }
 }
 
 // ---------------------------------------------------------------- helpers used by the tools
+
+/** Adds a document to the host (it becomes current); without a host it replaces the single document. */
+export function addDocument(ctx: ToolContext, doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}): string {
+  if (ctx.documents) return ctx.documents.add(doc, opts)
+  ctx.session.replaceDocument(doc, { label: `Open ${doc.name}` })
+  return ctx.session.doc.id
+}
 
 /** The document a tool call addresses: `documentId`, else the current one. Works without a host too. */
 export function resolveDocument(ctx: ToolContext, documentId?: string): DocumentRef {

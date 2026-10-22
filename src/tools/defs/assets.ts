@@ -90,6 +90,7 @@ export const assetTools = [
   defineTool({
     name: 'list_assets',
     group: 'assets',
+    document: false,
     readOnly: true,
     description:
       'List the saved assets in the library (characters, backgrounds, tiles, props): id, name, kind, tags, size, frame count and style notes. Optional filters: kind, and tags (assets that have ALL given tags). Use the ids with get_asset, place_asset, set_style_reference and get_style_context.',
@@ -107,6 +108,7 @@ export const assetTools = [
   defineTool({
     name: 'get_asset',
     group: 'assets',
+    document: false,
     readOnly: true,
     description:
       `Look at one asset: its metadata and notes, its palette (hex colors), the pixels of one frame as a grid ({legend, rows}, same format as read_grid / draw_grid; at most ${MAX_GET_ASSET_SIDE}x${MAX_GET_ASSET_SIDE}: a bigger asset gives a crop around its pixels, pass "region" for other parts) and a preview image. Does not change the document; use place_asset to put it on the canvas.`,

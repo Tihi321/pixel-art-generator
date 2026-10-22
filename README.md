@@ -39,7 +39,7 @@ yarn mcp --port 7500              # another port
 <Pixel Studio.exe> --mcp-only     # packaged app
 ```
 
-It prints `MCP listening on http://127.0.0.1:<port>/mcp` and serves every tool without a window. The tools run in the Electron main process against an in-memory set of documents (each `import_image`, `open_document` or `draw_sprite_from_reference` adds one; the newest is the current one; tools take a `document` id where it matters). Nothing is saved until `save_document` / `export_png` is called. Headless mode does not take the single-instance lock, so it can run next to the window app. If the port is taken it exits with an error; the window app instead opens and shows the bind error in Settings > MCP.
+It prints `MCP listening on http://127.0.0.1:<port>/mcp` and serves every tool without a window. The tools run in the Electron main process against an in-memory set of documents (each `new_document`, `open_project`, `import_image`, `open_document` or `draw_sprite_from_reference` adds one and never replaces another; the newest is the current one; every tool that works on a document takes an optional `document` id, so several clients can draw at once; `select_document` and `close_document` switch and close). Nothing is saved until `save_document` / `export_png` is called. Headless mode does not take the single-instance lock, so it can run next to the window app. If the port is taken it exits with an error; the window app instead opens and shows the bind error in Settings > MCP.
 
 Set `PIXEL_STUDIO_MCP_PORT` for the port and `PIXEL_STUDIO_MCP_TOKEN` for a bearer token. Files go where the call says (absolute paths, parent folders are created); relative file names go to `~/PixelStudio/exports` (or `projects` for `.pxs`).
 
@@ -51,7 +51,7 @@ Set `PIXEL_STUDIO_MCP_PORT` for the port and `PIXEL_STUDIO_MCP_TOKEN` for a bear
 | `export_png` | Now also `width`/`height` (exact nearest-neighbour size, any ratio: 320x180 to 1920x1080) and `document`. |
 | `export_many` | Several PNGs in one call. |
 | `draw_sprite_from_reference` | A new document with a hidden reference layer and drawing guidance, for an agent to draw a small sprite with `draw_grid`. |
-| `list_documents`, `open_document`, `save_document` | Document handling and the round trip below. |
+| `list_documents`, `open_document`, `save_document`, `select_document`, `close_document` | Document handling and the round trip below. |
 
 The new and changed tools end their result with one JSON text item (see `.claude/tickets/PAR-05-vn-studio-art/plan.md` and the VNO-02 contract). Image decoding: PNG always; JPEG/WebP only through Electron's decoder (the app and headless mode), not in plain Node.
 
