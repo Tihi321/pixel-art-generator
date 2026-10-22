@@ -119,6 +119,16 @@ Pixel Studio can hold several documents at once (tabs in the window, an in-memor
 - The new and changed tools end their result with one JSON object (documentId, size, paths, ...) after the readable text.
 - **Headless:** `yarn mcp` (`electron . --mcp-only [--port N]`, after `yarn build`) serves the same tools at `http://127.0.0.1:7457/mcp` with no window. In the window app, `--open <path> [--export-to <path>] [--export-width W --export-height H]` opens a document in the running or a new window.
 
+## VN expression sets
+
+A visual-novel character needs one transparent sprite per expression (VN Studio defaults: neutral, happy, sad, angry, surprised, worried, scared, thinking; names are lowercase letters and digits), bottom-aligned and all the same size. Keep them in ONE document: the body once, one frame per expression, only the face redrawn.
+
+1. Draw the finished base pose (whole figure, neutral face) on the "Sprite" layer.
+2. `make_expression_set {expressions:["neutral","happy","sad"], face:{x,y,w,h}}`: the base frame becomes the first expression, every other expression is a copy of it with all layers, and each frame gets a one-frame tag with the expression name. It is one undo step; call it again with more names to add expressions (existing ones are kept). `face` is optional (where the face is; it only appears in the guidance). The result lists what to change per expression (brows, eyes, mouth, head tilt).
+3. Frames are addressed by expression name: `{"frame":"happy"}` works in `draw_grid`, `render_preview`, `export_png`, `set_active` and every other tool that takes a frame (an id or a number still means the id or index). Per expression: `render_preview {frame:"happy"}`, then `draw_grid` on the face region with `frame:"happy"` (cover the old brows, eyes and mouth with the skin colour first).
+4. `export_expression_set {dir, prefix, height}` writes `<dir>/<prefix>_<expression>.png` for every expression, all at one size (nearest neighbour, exact `width`/`height` or integer `scale`; reference and hidden layers are not exported). Example: `{"dir":"C:/vn/mara","prefix":"mara","height":384}` gives `mara_neutral.png`, `mara_happy.png`, ...
+- `draw_sprite_from_reference {..., expressions:["neutral","happy"]}` creates the set together with the document (the frames are empty: draw the figure on the first one, then `copy_cel` it to the others).
+
 ## Export
 
 - `export_png`: the current frame, or all frames as separate files (`"frames":"all"`). Supports `scale`, or an exact `width` x `height`.

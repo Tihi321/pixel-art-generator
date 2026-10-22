@@ -58,7 +58,7 @@ describe('MCP HTTP server', () => {
     expect(s.server.sessionCount()).toBe(1)
 
     const { tools } = await client.listTools()
-    expect(tools).toHaveLength(67)
+    expect(tools).toHaveLength(69)
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object')
       expect(t.description).toBeTruthy()
@@ -144,7 +144,7 @@ describe('MCP HTTP server', () => {
     expect((await raw(s.port, { headers: JSON_HEADERS, body: INIT })).status).toBe(401)
     expect((await raw(s.port, { headers: { ...JSON_HEADERS, Authorization: 'Bearer wrong' }, body: INIT })).status).toBe(401)
     const client = await connect(s, { Authorization: 'Bearer secret-token' })
-    expect((await client.listTools()).tools.length).toBe(67)
+    expect((await client.listTools()).tools.length).toBe(69)
     await expect(connect(s)).rejects.toThrow()
   })
 

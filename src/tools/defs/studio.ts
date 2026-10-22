@@ -22,6 +22,7 @@ import {
   paletteToRgba,
   parseHexColor,
   rasterToCel,
+  requireTag,
   rgbaToHex,
   serializeProject,
   MAX_IMPORT_SIDE
@@ -29,7 +30,8 @@ import {
 import type { ToolResult } from '../../shared/tools'
 import { type ExportTarget, addDocument, exportToTarget, resolveDocument, writeDocumentPng } from '../documents'
 import { type ToolContext, defineTool, textResult } from '../registry'
-import { DOCUMENT_DESC, findPalette, obj, paletteNotFound, pathStem, plural, safeFileName, withExtension } from '../util'
+import { applyExpressionSet, expressionGuidance, expressionNames, expressionTags, faceRegion } from '../expressions'
+import { DOCUMENT_DESC, FRAME_REF_DESC, findPalette, fmtRect, frameRef, obj, paletteNotFound, pathStem, plural, resolveFrame, safeFileName, withExtension } from '../util'
 
 /** Human text first, then one JSON object as the LAST content item (the VN Studio contract). */
 export function withJson(text: string, json: Record<string, unknown>): ToolResult {
@@ -182,13 +184,16 @@ export const studioTools = [
     document: false,
     readOnly: true,
     description:
-      'Prepare a small sprite (up to 128x128, typically 64x96) that YOU then draw from a reference image: creates a new document of that size with the given palette, adds the reference downscaled to fit as a dimmed, locked REFERENCE layer (never exported), and returns drawing guidance. Draw on the "Sprite" layer with draw_grid (max 64x64 per call), look with render_preview, then export_png. The new document becomes current. Returns text plus JSON {documentId,name,width,height,palette,referenceLayerId}.',
+      'Prepare a small sprite (up to 128x128, typically 64x96) that YOU then draw from a reference image: creates a new document of that size with the given palette, adds the reference downscaled to fit as a dimmed, locked REFERENCE layer (never exported), and returns drawing guidance. Draw on the "Sprite" layer with draw_grid (max 64x64 per call), look with render_preview, then export_png. The new document becomes current. With `expressions` (e.g. ["neutral","happy"]) it is also an expression set: one tagged frame per expression (see make_expression_set). Returns text plus JSON {documentId,name,width,height,palette,referenceLayerId} (and expressions:[{name,frame,frameId,tagId}] when given).',
     input: obj({
       reference: z.string().min(1).describe('Absolute path of the reference image.'),
       width: z.number().int().min(1).max(128).describe('Sprite width in pixels (max 128).'),
       height: z.number().int().min(1).max(128).describe('Sprite height in pixels (max 128).'),
       palette: z.union([z.string(), z.array(z.string()).min(1)]).describe('Palette id/name (see list_palettes) or hex colors. Use only these colors.'),
       expression: z.string().optional().describe('Facial expression or pose to draw, e.g. "smiling", "worried", "surprised".'),
+      expressions: expressionNames
+        .optional()
+        .describe('Make an expression set: one frame per name (lowercase letters and digits), e.g. ["neutral","happy","sad"]. Frames are addressable by name, see make_expression_set.'),
       name: z.string().min(1).optional().describe('Document name. Default: the reference file name.')
     }),
     handler: async (args, ctx) => {
@@ -206,6 +211,8 @@ export const studioTools = [
       const data = new Uint32Array(rw * rh)
       for (let i = 0; i < data.length; i++) data[i] = small.data[i]!
       doc.cels.set(celKey(ref.id, doc.frames[0]!.id), { x: Math.floor((args.width - rw) / 2), y: Math.floor((args.height - rh) / 2), w: rw, h: rh, data })
+      // applied before the document is opened, so the set is part of its initial state (not an undo step)
+      const set = args.expressions ? applyExpressionSet(doc, { expressions: args.expressions, exec: (cmd) => cmd.apply(doc) }) : undefined
       const documentId = addDocument(ctx, doc)
       const hexes = palette.colors.map((c) => c.hex)
       const expression = args.expression?.trim()
@@ -214,9 +221,93 @@ export const studioTools = [
         `The reference (${src.width}x${src.height}) is on the locked, dimmed layer "Reference" (id ${ref.id}) at ${rw}x${rh}; it is NOT exported. Draw on the layer "Sprite" (id ${sprite.id}, the active layer).`,
         'How to draw: call render_preview to see the reference, read the silhouette, then paint with draw_grid (rows of characters + a legend of palette colors; max 64x64 per call, use x/y for the rest). Block in the silhouette in one color first, then base colors, shading, highlights, and finally a 1 px outline (the outline tool can do it). Use only the palette colors, hue-shifted shadows (cooler) and highlights (warmer). Keep it clean: no stray single pixels.',
         expression ? `Expression: ${expression}. Keep the body and outfit of the reference and change only what shows the expression (eyes, brows, mouth, head tilt). Redraw the face at the pixel level instead of blurring it.` : 'Expression: copy the one in the reference.',
-        'When done: render_preview to compare with the reference, fix differences, then export_png (width/height for an exact size).'
+        ...(set ? [expressionGuidance(set, undefined, { undrawn: true })] : []),
+        set
+          ? 'When done: render_preview to compare with the reference, then export_expression_set (one PNG per expression).'
+          : 'When done: render_preview to compare with the reference, fix differences, then export_png (width/height for an exact size).'
       ].join('\n')
-      return withJson(guide, { documentId, name, width: args.width, height: args.height, palette: hexes, referenceLayerId: ref.id })
+      return withJson(guide, {
+        documentId,
+        name,
+        width: args.width,
+        height: args.height,
+        palette: hexes,
+        referenceLayerId: ref.id,
+        ...(set ? { expressions: set.map(({ name: n, frame, frameId, tagId }) => ({ name: n, frame, frameId, tagId })) } : {})
+      })
+    }
+  }),
+
+  defineTool({
+    name: 'make_expression_set',
+    group: 'documents',
+    description:
+      'Turn the document into an expression set for a visual-novel character: one frame per expression, each frame tagged with the expression name, so {"frame":"happy"} addresses it in every tool (draw_grid, render_preview, export_png, set_active). ' +
+      'Draw the finished base pose first (the whole figure, neutral face). The base frame (default: the active frame) becomes the first expression; every other expression is a copy of it, all layers included, so the body stays identical and you only redraw the face. ' +
+      'Expression names are lowercase letters and digits; VN Studio defaults: neutral, happy, sad, angry, surprised, worried, scared, thinking. Call it again with more names to add expressions (existing ones are kept). `face` is optional: the rectangle where the face is, repeated in the guidance. One undo step. ' +
+      'Then redraw each face, and export_expression_set. Example: {"expressions":["neutral","happy","sad"],"face":{"x":8,"y":4,"w":12,"h":10}}. Returns guidance text plus JSON {documentId,expressions:[{name,frame,frameId,tagId}],face}.',
+    input: obj({
+      expressions: expressionNames.describe('Expression names, 1-24, lowercase letters and digits, e.g. ["neutral","happy","sad"]. The first one is the base frame.'),
+      base: frameRef(`${FRAME_REF_DESC} The finished base pose. Default: the active frame.`).optional(),
+      face: faceRegion.optional().describe('Where the face is on the canvas: {x,y,w,h}. Only used for the guidance.')
+    }),
+    handler: ({ expressions, base, face }, { session }) => {
+      const doc = session.doc
+      if (face && (face.x < 0 || face.y < 0 || face.x + face.w > doc.width || face.y + face.h > doc.height)) {
+        throw new Error(`face ${fmtRect(face)} does not fit the canvas ${doc.width}x${doc.height}.`)
+      }
+      const baseFrame = resolveFrame(session, base)
+      const entries = applyExpressionSet(doc, { expressions, base: baseFrame.id, exec: (cmd) => session.execute(cmd) })
+      const all = expressionTags(doc).length
+      const created = entries.filter((e) => e.created).length
+      const text = `${created ? `Added ${plural(created, 'expression')}` : 'No new expressions'} (${plural(all, 'expression')} in the document, ${plural(doc.frames.length, 'frame')}).\n${expressionGuidance(entries, face)}`
+      return withJson(text, {
+        documentId: session.doc.id,
+        expressions: entries.map(({ name, frame, frameId, tagId }) => ({ name, frame, frameId, tagId })),
+        face: face ?? null
+      })
+    }
+  }),
+
+  defineTool({
+    name: 'export_expression_set',
+    group: 'export',
+    readOnly: true,
+    description:
+      'Export every expression of the document as its own PNG: <dir>/<prefix>_<expression>.png, all at the same size (nearest neighbour; width/height exact or integer scale, like export_png). Expressions are the one-frame tags made by make_expression_set (or only the listed `expressions`). Hidden and reference layers are not exported, so the sprites are transparent. ' +
+      'dir is an absolute folder (a relative one goes below ~/PixelStudio/exports); prefix defaults to the document name. Example: {"dir":"C:/vn/books/b1/characters/mara","prefix":"mara","height":384}. Returns text plus JSON {files:[{expression,path}],width,height}.',
+    input: obj({
+      dir: z.string().min(1).describe('Output folder (absolute, or relative to ~/PixelStudio/exports).'),
+      prefix: z.string().min(1).optional().describe('File name prefix: files are <prefix>_<expression>.png. Default: the document name.'),
+      expressions: expressionNames.optional().describe('Only these expressions. Default: all expressions of the document.'),
+      scale: z.number().int().min(1).max(32).optional().describe('Integer upscale factor (default 1). Ignored when width and height are given.'),
+      width: z.number().int().min(1).max(8192).optional().describe('Exact output width in pixels (nearest neighbour).'),
+      height: z.number().int().min(1).max(8192).optional().describe('Exact output height in pixels. With only one of width/height the aspect ratio is kept.')
+    }),
+    handler: async (args, { session, services }) => {
+      const doc = session.doc
+      const tags = args.expressions
+        ? [...new Set(args.expressions)].map((n) => {
+            const t = requireTag(doc, n)
+            if (t.from !== t.to) throw new Error(`Tag "${n}" covers ${plural(t.to - t.from + 1, 'frame')}, it is not an expression. Expressions are one-frame tags (see make_expression_set).`)
+            return t
+          })
+        : expressionTags(doc)
+      if (tags.length === 0) throw new Error('This document has no expressions. Call make_expression_set first.')
+      const dir = args.dir.replace(/[\\/]+$/, '')
+      const prefix = safeFileName(args.prefix ?? doc.name)
+      const files: Array<{ expression: string; path: string }> = []
+      let size = { width: doc.width, height: doc.height }
+      for (const t of tags) {
+        const r = await writeDocumentPng(session, services, `${dir}/${prefix}_${t.name}.png`, { width: args.width, height: args.height, scale: args.scale, frame: doc.frames[t.from]!.id })
+        files.push({ expression: t.name, path: r.path })
+        size = r
+      }
+      return withJson(`Exported ${plural(files.length, 'expression')} as PNG (${size.width}x${size.height} px each):\n${files.map((f) => `${f.expression}: ${f.path}`).join('\n')}`, {
+        files,
+        width: size.width,
+        height: size.height
+      })
     }
   }),
 

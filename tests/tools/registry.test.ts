@@ -12,15 +12,15 @@ const EXPECTED = [
   'get_palette', 'set_palette', 'add_colors', 'remove_colors', 'list_palettes', 'load_palette', 'import_palette', 'export_palette', 'remap_to_palette', 'save_palette',
   'list_assets', 'get_asset', 'save_as_asset', 'place_asset', 'set_style_reference', 'get_style_context',
   'export_png', 'export_spritesheet', 'export_gif',
-  'import_image', 'export_many', 'draw_sprite_from_reference', 'list_documents', 'open_document', 'save_document', 'select_document', 'close_document',
+  'import_image', 'export_many', 'draw_sprite_from_reference', 'list_documents', 'open_document', 'save_document', 'select_document', 'close_document', 'make_expression_set', 'export_expression_set',
   'undo', 'redo'
 ]
 
 describe('createDefaultRegistry', () => {
   const registry = createDefaultRegistry()
 
-  it('contains all 67 tools', () => {
-    expect(registry.list()).toHaveLength(67)
+  it('contains all 69 tools', () => {
+    expect(registry.list()).toHaveLength(69)
     expect(registry.list().map((t) => t.name).sort()).toEqual([...EXPECTED].sort())
   })
 
@@ -99,7 +99,7 @@ describe('createToolHost', () => {
   it('lists defs, serializes calls and groups turns', async () => {
     const t = setup()
     const host = createToolHost(t.registry, () => ({ session: t.session, services: t.services }))
-    expect(host.tools()).toHaveLength(67)
+    expect(host.tools()).toHaveLength(69)
     const sig = new AbortController().signal
     const d0 = t.session.history.undoDepth
     host.beginTurn('Test turn')

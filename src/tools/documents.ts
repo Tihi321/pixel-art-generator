@@ -12,7 +12,7 @@ import { frameImage } from '../core/convert'
 import type { ToolContext } from './registry'
 import { EditorSession } from './session'
 import type { ToolServices } from './services'
-import { withExtension } from './util'
+import { resolveFrame, withExtension } from './util'
 
 export interface ExportTarget {
   /** Absolute path (a relative name goes to ~/PixelStudio/exports). */
@@ -219,8 +219,7 @@ export async function writeDocumentPng(
   opts: WritePngOptions = {}
 ): Promise<{ path: string; width: number; height: number; frame: number }> {
   const doc = session.doc
-  const frame = opts.frame === undefined ? session.activeFrame : (doc.frames.find((f) => f.id === opts.frame) ?? doc.frames[Number(opts.frame)])
-  if (!frame) throw new Error(`Frame ${JSON.stringify(opts.frame)} not found.`)
+  const frame = resolveFrame(session, opts.frame)
   const img = frameImage(doc, frame.id, opts)
   const full = await services.resolveExportPath(withExtension(target, 'png'))
   await services.writeFile(full, encodePng(img))

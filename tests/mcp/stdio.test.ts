@@ -31,7 +31,7 @@ describe('stdio shim relay', () => {
     const { client, clientSide } = await viaRelay(s.url.href, 'tok')
     await client.connect(clientSide)
     expect(client.getInstructions()).toBe(GUIDE_SHORT)
-    expect((await client.listTools()).tools).toHaveLength(67)
+    expect((await client.listTools()).tools).toHaveLength(69)
     const r = await client.callTool({ name: 'new_document', arguments: { width: 4, height: 4 } })
     expect(r.isError).toBeFalsy()
     expect(s.session.doc.width).toBe(4)

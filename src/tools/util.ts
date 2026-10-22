@@ -12,6 +12,7 @@ import {
   createPaintCommand,
   findFrame,
   findLayer,
+  findTag,
   frameIndex,
   getBuiltinPalette,
   hexToRgba,
@@ -34,7 +35,7 @@ export const obj = z.strictObject
 /** The `document` argument every document tool accepts. */
 export const DOCUMENT_DESC = 'documentId (see list_documents). Default: the current document.'
 export const LAYER_REF_DESC = 'Layer id, exact name, or 0-based index (0 = bottom layer).'
-export const FRAME_REF_DESC = 'Frame id or 0-based index (0 = first frame).'
+export const FRAME_REF_DESC = 'Frame id, 0-based index (0 = first frame) or the name of a one-frame tag such as an expression ("happy").'
 export const COLOR_DESC =
   'Color: hex "#rrggbb" (or "#rgb"/"#rrggbbaa"), a palette index like 8 or "p8", a palette color name, or "transparent".'
 
@@ -94,12 +95,16 @@ export function resolveLayer(session: EditorSession, ref?: string | number): Lay
   return requireLayer(doc, ref)
 }
 
+/** A frame by id, 0-based index (number or numeric string) or the name of a one-frame tag (expression sets). */
 export function resolveFrame(session: EditorSession, ref?: string | number): Frame {
   if (ref === undefined) return session.activeFrame
   const doc = session.doc
   if (typeof ref === 'string' && !findFrame(doc, ref)) {
     const n = numericString(ref)
     if (n !== null) return requireFrame(doc, n)
+    const tag = findTag(doc, ref)
+    if (tag && tag.from === tag.to) return requireFrame(doc, tag.from)
+    if (tag) throw new Error(`"${ref}" is an animation tag of ${plural(tag.to - tag.from + 1, 'frame')} (frames ${tag.from}-${tag.to}), not a single frame. Use a frame index or id.`)
   }
   return requireFrame(doc, ref)
 }

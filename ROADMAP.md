@@ -8,5 +8,4 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 
 ## Visual novel assets
 
-- No expression-set tool (VN Studio has expression sets per book and character since VNO-08).
 - No 9-slice or UI-element support (textbox, buttons).
