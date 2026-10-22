@@ -47,13 +47,13 @@ Set `PIXEL_STUDIO_MCP_PORT` for the port and `PIXEL_STUDIO_MCP_TOKEN` for a bear
 
 | Tool | What it does |
 | --- | --- |
-| `import_image` | PNG (JPEG too in the app) to clean pixel art in a new document: alpha-aware area downscale, alpha threshold, palette remap (`none`/`ordered`/`floyd` dithering, never on transparent pixels), orphan cleanup, optional outline, auto palette (median cut) when none is given. Max 512x512. |
+| `import_image` | PNG, JPEG, WebP (and GIF/BMP/AVIF in the app and headless mode) to clean pixel art in a new document: alpha-aware area downscale, alpha threshold, palette remap (`none`/`ordered`/`floyd` dithering, never on transparent pixels), orphan cleanup, optional outline, auto palette (median cut) when none is given. Max 2048x2048. |
 | `export_png` | Now also `width`/`height` (exact nearest-neighbour size, any ratio: 320x180 to 1920x1080) and `document`. |
 | `export_many` | Several PNGs in one call. |
 | `draw_sprite_from_reference` | A new document with a hidden reference layer and drawing guidance, for an agent to draw a small sprite with `draw_grid`. |
 | `list_documents`, `open_document`, `save_document`, `select_document`, `close_document` | Document handling and the round trip below. |
 
-The new and changed tools end their result with one JSON text item (see `.claude/tickets/PAR-05-vn-studio-art/plan.md` and the VNO-02 contract). Image decoding: PNG always; JPEG/WebP only through Electron's decoder (the app and headless mode), not in plain Node.
+The new and changed tools end their result with one JSON text item (see `.claude/tickets/PAR-05-vn-studio-art/plan.md` and the VNO-02 contract). Image decoding: PNG always; JPEG, WebP, GIF (first frame), BMP and AVIF only through Electron (nativeImage, then a hidden Chromium decoder window; the app and headless mode), not in plain Node.
 
 ### Round trip from another app (window mode)
 

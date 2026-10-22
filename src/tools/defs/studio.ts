@@ -38,9 +38,9 @@ export function withJson(text: string, json: Record<string, unknown>): ToolResul
   return r
 }
 
-const IMAGE_EXT = /\.(png|jpe?g|webp)$/i
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|avif)$/i
 
-/** PNG natively; JPEG/WebP through `services.decodeImage` when the host has one. */
+/** PNG natively; JPEG/WebP/GIF/BMP/AVIF through `services.decodeImage` when the host has one. */
 export async function decodeImageFile(ctx: ToolContext, path: string): Promise<RgbaImage> {
   const bytes = await ctx.services.readFile(path)
   if (hasPngSignature(bytes)) return decodePng(bytes)
@@ -82,12 +82,12 @@ export const studioTools = [
     document: false,
     readOnly: true,
     description:
-      `Turn an image file (PNG always; JPEG/WebP when the app can decode them) into a pixel-art document: area-average downscale (alpha-aware, so transparent backgrounds do not bleed into the edges) -> alpha threshold -> remap to a palette with optional dithering (transparent pixels are never dithered) -> orphan-pixel cleanup -> optional 1 px outline. The result is a NEW document with one pixel layer, and it becomes the current document. Max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}. ` +
+      `Turn an image file (PNG always; JPEG, WebP and GIF/BMP/AVIF in the app and in headless mode, not in plain Node) into a pixel-art document: area-average downscale (alpha-aware, so transparent backgrounds do not bleed into the edges) -> alpha threshold -> remap to a palette with optional dithering (transparent pixels are never dithered) -> orphan-pixel cleanup -> optional 1 px outline. The result is a NEW document with one pixel layer, and it becomes the current document. Max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}. ` +
       'Give width and height (or only one: the aspect ratio is kept) or scale (a divisor). Use `palette` (a palette id/name such as "endesga-32", or a list of hex colors) to force the colors; without it maxColors colors are derived from the image (median cut). ' +
-      'Then export_png with width/height to get an exact size, e.g. a 320x180 import exported at 1920x1080. Example: {"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}. ' +
+      'A 1920x1080 background can be imported directly; or import 320x180 and export_png with width/height 1920x1080. Example: {"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}. ' +
       'Returns a sentence and a JSON object {documentId,name,width,height,colors,transparentPixels}.',
     input: obj({
-      path: z.string().min(1).describe('Absolute path of the image file (PNG; JPEG/WebP if supported).'),
+      path: z.string().min(1).describe('Absolute path of the image file (PNG; JPEG, WebP, GIF, BMP, AVIF in the app and headless mode).'),
       name: z.string().min(1).optional().describe('Document name. Default: the file name.'),
       width: z.number().int().min(1).max(MAX_IMPORT_SIDE).optional().describe('Output width in pixels.'),
       height: z.number().int().min(1).max(MAX_IMPORT_SIDE).optional().describe('Output height in pixels.'),

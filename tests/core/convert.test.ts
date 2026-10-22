@@ -38,12 +38,38 @@ describe('resolveTargetSize', () => {
     expect(resolveTargetSize(1920, 1080, { width: 320 })).toEqual({ width: 320, height: 180 })
     expect(resolveTargetSize(1920, 1080, { height: 90 })).toEqual({ width: 160, height: 90 })
   })
-  it('uses scale and explicit sizes, and rejects more than 512', () => {
+  it('uses scale and explicit sizes, and rejects more than 2048', () => {
     expect(resolveTargetSize(640, 360, { scale: 2 })).toEqual({ width: 320, height: 180 })
     expect(resolveTargetSize(100, 100, { width: 64, height: 96 })).toEqual({ width: 64, height: 96 })
-    expect(() => resolveTargetSize(1920, 1080, {})).toThrow(/max 512/)
-    expect(() => resolveTargetSize(100, 100, { width: 513, height: 10 })).toThrow(/max 512/)
+    expect(resolveTargetSize(1920, 1080, {})).toEqual({ width: 1920, height: 1080 })
+    expect(resolveTargetSize(4000, 2000, { width: 2048, height: 1024 })).toEqual({ width: 2048, height: 1024 })
+    expect(() => resolveTargetSize(4000, 3000, {})).toThrow(/max 2048x2048/)
+    expect(() => resolveTargetSize(100, 100, { width: 2049, height: 10 })).toThrow(/max 2048x2048/)
   })
+  it('refuses a source above 16384 px a side or 64 megapixels', () => {
+    expect(() => resolveTargetSize(16385, 100, { width: 10 })).toThrow(/source image is too large/)
+    expect(() => resolveTargetSize(9000, 9000, { width: 10 })).toThrow(/source image is too large/)
+    expect(resolveTargetSize(8000, 8000, { width: 10 })).toEqual({ width: 10, height: 10 })
+  })
+})
+
+describe('large imports', () => {
+  it('converts a 2048x1152 image at full size', () => {
+    const w = 2048
+    const h = 1152
+    const data = new Uint32Array(w * h)
+    for (let i = 0; i < data.length; i++) {
+      const x = i % w
+      const y = (i / w) | 0
+      data[i] = packRgba((x * 255) / w, (y * 255) / h, (x * 3 + y * 5) % 256)
+    }
+    const t0 = Date.now()
+    const res = convertImage({ width: w, height: h, data }, { width: w, height: h, maxColors: 32, dither: 'floyd' })
+    console.log(`convertImage 2048x1152 floyd: ${Date.now() - t0} ms`)
+    expect(res.raster.width).toBe(w)
+    expect(res.raster.height).toBe(h)
+    expect(res.colors).toBeLessThanOrEqual(32)
+  }, 60_000)
 })
 
 describe('areaResize', () => {

@@ -78,7 +78,7 @@ describe('import_image + export_png', () => {
     const t = headlessSetup()
     t.services.files.set('/in/x.jpg', Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))
     expect(resultText(await t.call('import_image', { path: '/in/x.jpg' }))).toMatch(/PNG files only/)
-    t.services.files.set('/in/big.png', pngOf(600, 8, () => packRgba(1, 2, 3)))
+    t.services.files.set('/in/big.png', pngOf(2100, 8, () => packRgba(1, 2, 3)))
     expect(resultText(await t.call('import_image', { path: '/in/big.png' }))).toMatch(/too large/)
     expect((await t.call('import_image', { path: '/in/big.png', width: 8, palette: 'no-such' })).isError).toBe(true)
   })

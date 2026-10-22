@@ -8,7 +8,7 @@ import { AssetStore } from './assets'
 import { startAssets } from './assetsApp'
 import { type CliArgs, openDocumentArgs, parseCli } from './cli'
 import { startHeadless } from './headless'
-import { decodeWithNativeImage } from './imageDecode'
+import { decodeImage, disposeImageDecoder } from './imageDecode'
 import { DEFAULT_MCP_PORT } from '../shared/mcp'
 import type { ToolServices } from '../tools/services'
 
@@ -48,6 +48,7 @@ function createWindow(): BrowserWindow {
   win.webContents.on('did-start-loading', () => toolBridge.setTarget(win.webContents))
   win.on('closed', () => {
     toolBridge.setTarget(null)
+    disposeImageDecoder() // the hidden decoder window would keep the app from seeing window-all-closed
     if (mainWindow === win) mainWindow = null
   })
 
@@ -71,7 +72,7 @@ function openInWindow(args: CliArgs): void {
 async function runHeadless(): Promise<void> {
   const port = cli.port ?? (Number(process.env['PIXEL_STUDIO_MCP_PORT']) || DEFAULT_MCP_PORT)
   const base = createNodeServices()
-  const headlessServices: ToolServices = { ...base, assets: new AssetStore(), decodeImage: decodeWithNativeImage }
+  const headlessServices: ToolServices = { ...base, assets: new AssetStore(), decodeImage }
   const h = await startHeadless({
     port,
     services: headlessServices,
@@ -113,7 +114,7 @@ if (cli.mcpOnly) {
     })
 
     void app.whenReady().then(() => {
-      services = registerServices(ipcMain, { ...createNodeServices(), decodeImage: decodeWithNativeImage })
+      services = registerServices(ipcMain, { ...createNodeServices(), decodeImage })
       toolBridge.registerIpc(ipcMain)
       startMcp(toolBridge)
       registerAgentIpc(ipcMain, toolBridge)

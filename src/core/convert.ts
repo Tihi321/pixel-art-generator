@@ -8,7 +8,10 @@ import { type Document, TRANSPARENT, createPaletteMatcher, packRgba, unpackRgba 
 import { type RgbaImage } from './codecs/png'
 import { type Raster, createRaster, flattenFrame, outline as outlineRaster } from './raster'
 
-export const MAX_IMPORT_SIDE = 512
+export const MAX_IMPORT_SIDE = 2048
+/** Source images above these limits are refused (memory): either side, or the pixel count. */
+export const MAX_SOURCE_SIDE = 16384
+export const MAX_SOURCE_PIXELS = 64 * 1024 * 1024
 export const MAX_EXPORT_SIDE = 8192
 
 export type DitherMode = 'none' | 'ordered' | 'floyd'
@@ -24,9 +27,13 @@ export interface TargetSizeOptions {
 
 /**
  * Output size of an import. Both width and height: exactly those. One of them: the other follows the
- * aspect ratio. `scale`: source size divided by it. Nothing: the source size. Throws above 512x512.
+ * aspect ratio. `scale`: source size divided by it. Nothing: the source size. Throws above 2048x2048,
+ * and for a source above 16384 px a side or 64M pixels.
  */
 export function resolveTargetSize(srcW: number, srcH: number, o: TargetSizeOptions = {}): { width: number; height: number } {
+  if (srcW > MAX_SOURCE_SIDE || srcH > MAX_SOURCE_SIDE || srcW * srcH > MAX_SOURCE_PIXELS) {
+    throw new Error(`The source image is too large (${srcW}x${srcH}; max ${MAX_SOURCE_SIDE} px a side and ${MAX_SOURCE_PIXELS / 1024 / 1024} megapixels). Downscale it first.`)
+  }
   let w: number
   let h: number
   if (o.width !== undefined && o.height !== undefined) {
@@ -49,7 +56,7 @@ export function resolveTargetSize(srcW: number, srcH: number, o: TargetSizeOptio
   w = Math.max(1, Math.round(w))
   h = Math.max(1, Math.round(h))
   if (w > MAX_IMPORT_SIDE || h > MAX_IMPORT_SIDE) {
-    throw new Error(`The converted size ${w}x${h} is too large (max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}). The source is ${srcW}x${srcH}: pass width/height (for example width 320, height 180) or a larger scale.`)
+    throw new Error(`The converted size ${w}x${h} is too large (max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}). The source is ${srcW}x${srcH}: pass width/height (for example width 1920, height 1080) or a larger scale.`)
   }
   return { width: w, height: h }
 }
