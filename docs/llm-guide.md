@@ -5,14 +5,15 @@ You are driving Pixel Studio, a pixel-art editor with layers, animation frames, 
 <!-- short:start -->
 Pixel Studio quick guide
 - Canvas: origin (0,0) is top-left, x goes right, y goes down. Layers and frames are addressed by id, name or 0-based index. Edits go to the active layer and frame unless `layer` / `frame` are given.
-- Workflow: `get_document` -> pick a palette (`list_palettes`, `load_palette`, or `set_palette` for your own) -> sketch the silhouette with `draw_grid` -> shade -> outline -> `render_preview` to check -> fix -> export.
-- `draw_grid`: rows of text, one character per pixel, plus a legend {char: "#hex" | palette index | null}. Max 64x64 per call; use x,y to place it. `read_grid` returns pixels in the same format.
-- Use only palette colours and hue-shifted ramps (shadows cooler, highlights warmer). Keep sprites small (16-64 px).
-- Animation: `duplicate_frame`, then edit only the differences; keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8, attack 3-6); `set_frame_duration` in ms.
+- Workflow: `get_document` -> pick a palette (`list_palettes`, `load_palette`, `set_palette`) -> sketch the silhouette with `draw_grid` -> shade -> outline -> `render_preview` -> fix -> export.
+- `draw_grid`: rows of text, one character per pixel, plus a legend {char: "#hex" | palette index | null}. Max 256x256 per call; use x,y to place it. `read_grid` returns pixels in the same format.
+- Big scenes: `draw_gradient` (sky), `draw_polygon {filled:true}` (hills; not line + flood_fill), `draw_image` (a whole PNG at once).
+- Use only palette colours and hue-shifted ramps (shadows cooler, highlights warmer). Keep sprites small.
+- Animation: `duplicate_frame`, edit only the differences, keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8); `set_frame_duration` in ms.
 - References: if `get_document` lists `references`, call `get_style_context` first and use exactly its palette. Library: `list_assets`, `place_asset`, `save_as_asset`.
 - Export: `export_png` (`width`+`height` = exact size), `export_spritesheet`, `export_gif`. `undo` / `redo` fix mistakes.
-- Images: `import_image` makes pixel art from a PNG in a new document. Several documents: every tool takes an optional `document` id (`list_documents`); `new_document` adds one.
-- Errors come back as text: read them and correct the call.
+- `import_image` makes pixel art from a PNG in a new document. Every tool takes an optional `document` id (`list_documents`).
+- Errors come back as text: read and fix the call.
 <!-- short:end -->
 
 ## Coordinates and layers
@@ -49,9 +50,19 @@ Pixel Studio quick guide
 - One character is one pixel. All rows must have the same length. The grid's top-left lands at (x, y).
 - The legend maps a character to a hex colour, a palette index, or null for transparent. Without a legend, characters are palette indices: 0-9, then a-z, then A-Z, and "." is transparent. These are the same characters `read_grid` prints.
 - Transparent cells leave existing pixels alone. Pass `"transparent": "clear"` when the grid should replace its rectangle completely (erasing as well).
-- Keep each call at 64x64 characters or smaller. For bigger art send several grids with different x and y.
+- Keep each call at 256x256 characters or smaller. For bigger art send several grids with different x and y, or use the bulk tools below.
 - Edit existing art with `read_grid` (it returns `legend` and `rows`), change a few characters, and send it back with `draw_grid` using `"transparent":"clear"`.
 - For small touch-ups use `set_pixels`. Other tools: `draw_line`, `draw_rect`, `draw_ellipse`, `flood_fill`, `replace_color`, `clear_cel`, and `transform_cel` (flip, rotate, shift).
+
+## Big scenes: gradients, polygons and whole images
+
+A 320x180 background should take a handful of calls, not hundreds of grids.
+
+- `draw_gradient {stops, direction?, dither?, mask?, x?, y?, w?, h?}`: stops are `{at: 0..1, color}`. `direction` is "vertical" (default), "horizontal", "diagonal", "radial" or an angle in degrees (0 = left to right, 90 = top to bottom). `dither` "ordered" (default, 4x4 Bayer) or "ordered8" mixes only the neighbouring stop colors, so the result stays pixel art; "checker" and "none" make hard bands; "smooth" blends true colors and adds many colors (not pixel art). `mask` "transparent" paints only empty pixels (a sky behind hills), "opaque" only existing pixels (shading).
+- `draw_polygon {points, color, filled?, thickness?, closed?}`: points are `[x, y]` or `{x, y}`, up to 1024. Use `filled:true` for every closed shape (hills, mountains, roofs); line + `flood_fill` leaks or leaves gaps. The outline is drawn through the vertices, so two polygons sharing an edge leave no gap. Self-crossing outlines follow the even-odd rule. `closed:false` draws a polyline.
+- `draw_image {png | path, x?, y?, transparent?, snap?, dither?}`: paints a whole base64 PNG (or an image file) at once, for example a foreground you composed in code. Alpha is binary (>= 128 is opaque). `snap:"palette"` remaps to the document palette; otherwise the result tells you how many colors are outside it.
+
+Example sequence for a 320x180 scene on separate layers: `new_document {"width":320,"height":180,"palette":"db32"}`, then `draw_gradient` for the sky (ordered dither), three `draw_polygon` calls with `filled:true` for hills from far (light) to near (dark), and `draw_image` for the foreground. Check with `render_preview` or `export_png`.
 
 ## Palette and colour rules
 

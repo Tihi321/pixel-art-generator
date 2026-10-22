@@ -62,7 +62,7 @@ export const rectShape = {
 }
 export const regionSchema = z.strictObject(rectShape)
 
-export const MAX_GRID_SIDE = 64
+export const MAX_GRID_SIDE = 256
 
 // ---------------------------------------------------------------- results
 

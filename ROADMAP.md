@@ -8,7 +8,7 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 
 ## Drawing
 
-- **A full background is slow to draw by hand.** `draw_grid` is capped at 64x64; there is no polygon, gradient/dither or bitmap-text tool; and line + `flood_fill` leaks or leaves gaps. The hub works around it with `scripts/pxcanvas.py`, which composes the picture in code and sends it as `draw_grid` tiles. Wanted: `draw_polygon`, `draw_gradient {stops, dither}`, a bulk `draw_image` / `set_layer_pixels` that takes a whole layer, and a tiny pixel font.
+- **No pixel font.** There is no bitmap-text tool, so lettering (titles, labels, speech bubbles) has to be drawn by hand. Wanted: a tiny built-in pixel font and a `draw_text` tool (PAR-11).
 
 ## Visual novel assets
 
