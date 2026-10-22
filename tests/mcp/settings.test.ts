@@ -118,4 +118,23 @@ describe('PIXEL_STUDIO_MCP_PORT', () => {
       else process.env['PIXEL_STUDIO_MCP_PORT'] = prev
     }
   })
+
+  it('a start override port wins over mcp.json and the env, enables MCP, and is not saved', async () => {
+    const dir = await tmp()
+    await saveMcpSettings({ enabled: false, port: 7457, token: null }, dir)
+    const free = await new Promise<number>((resolve) => {
+      const srv = createServer().listen(0, '127.0.0.1', () => {
+        const port = (srv.address() as { port: number }).port
+        srv.close(() => resolve(port))
+      })
+    })
+    const ctl = registerMcp({ handle: () => undefined }, memoryHost().host, { shimPath: '/shim/index.js', configDir: dir, port: free })
+    try {
+      const st = await ctl.start()
+      expect(st.status.url).toBe(`http://127.0.0.1:${free}/mcp`)
+      expect(JSON.parse(await readFile(join(dir, 'mcp.json'), 'utf8'))).toEqual({ enabled: false, port: 7457, token: null })
+    } finally {
+      await ctl.stop()
+    }
+  })
 })

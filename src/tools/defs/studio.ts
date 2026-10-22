@@ -280,7 +280,10 @@ export const studioTools = [
       path: z.string().min(1).describe('Absolute path of a .pxs project or a PNG.'),
       exportTo: z.string().min(1).optional().describe('Absolute path of the PNG to write on every save.'),
       exportWidth: z.number().int().min(1).optional().describe('Exact export width (use with exportHeight).'),
-      exportHeight: z.number().int().min(1).optional().describe('Exact export height (use with exportWidth).')
+      exportHeight: z.number().int().min(1).optional().describe('Exact export height (use with exportWidth).'),
+      handover: obj({ path: z.string().optional(), dirty: z.boolean().optional() })
+        .optional()
+        .describe('Internal, not for agents: the window opening a document the headless engine handed over. `path` = the project path to remember (omit = never saved), `dirty` = keep it unsaved. Only for a .pxs.')
     }),
     handler: async (args, ctx) => {
       const exportTo: ExportTarget | undefined = args.exportTo ? { path: args.exportTo, width: args.exportWidth, height: args.exportHeight } : undefined
@@ -298,6 +301,10 @@ export const studioTools = [
         const cel = rasterToCel(r)
         if (cel) doc.cels.set(celKey(doc.layers[0]!.id, doc.frames[0]!.id), cel)
         documentId = addDocument(ctx, doc, { path: null, exportTo })
+      } else if (args.handover) {
+        const doc = deserializeProject(new TextDecoder().decode(await ctx.services.readFile(args.path)))
+        nativePath = args.handover.path ?? null
+        documentId = addDocument(ctx, doc, { path: nativePath, exportTo, dirty: args.handover.dirty })
       } else {
         const full = await ctx.services.resolveProjectPath(withExtension(args.path, 'pxs'))
         nativePath = full

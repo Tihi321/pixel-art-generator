@@ -334,7 +334,7 @@ export const workspaceDocuments: DocumentHost = {
     if (!tab) throw new Error(`Unknown document "${documentId}". Call list_documents to see the open documents.`)
     return { documentId: tab.id, session: tab.session, path: tab.projectPath, exportTo: tab.exportTo }
   },
-  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}) {
+  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean } = {}) {
     const path = opts.path ?? null
     const active = workspace.active
     if (active.session.turnActive) {
@@ -347,7 +347,7 @@ export const workspaceDocuments: DocumentHost = {
     const tab = workspace.active
     tab.exportTo = opts.exportTo
     // a document that exists only in memory is unsaved work: it is not "pristine" and closing it asks first
-    if (path === null) {
+    if (path === null || opts.dirty) {
       tab.edits = Math.max(tab.edits, 1)
       tab.savedEdits = 0
     }

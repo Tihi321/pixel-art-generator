@@ -6,10 +6,6 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 
 - Headless MCP on `127.0.0.1:7457/mcp` (`--mcp-only`), used by VN Studio for pixel conversion and drawing. VN Studio's VNO-08 added a `grid` draw mode (one call per sprite), so the client provider can draw without a per-turn timeout.
 
-## Documents and sessions
-
-- **Opening the app while the headless engine runs** (VN Studio's "Open in Pixel Studio", or a double-click) can fail with no message while the headless studio holds `engine.lock` (found while planning hub HUB-08, 2026-10-22). It should say so, or attach to the running engine.
-
 ## Drawing
 
 - **A full background is slow to draw by hand.** `draw_grid` is capped at 64x64; there is no polygon, gradient/dither or bitmap-text tool; and line + `flood_fill` leaks or leaves gaps. The hub works around it with `scripts/pxcanvas.py`, which composes the picture in code and sends it as `draw_grid` tiles. Wanted: `draw_polygon`, `draw_gradient {stops, dither}`, a bulk `draw_image` / `set_layer_pixels` that takes a whole layer, and a tiny pixel font.

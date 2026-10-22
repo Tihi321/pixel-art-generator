@@ -44,8 +44,8 @@ export interface DocumentHost {
   list(): DocumentInfo[]
   /** The document with this id (default: the current one). Throws "Unknown document" otherwise. */
   resolve(documentId?: string): DocumentRef
-  /** Adds a document and makes it current. Returns its id. */
-  add(doc: Document, opts?: { path?: string | null; exportTo?: ExportTarget }): string
+  /** Adds a document and makes it current. Returns its id. `dirty` opens it with unsaved changes (even when it has a path). */
+  add(doc: Document, opts?: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean }): string
   /** The document with this native project path, if it is open. */
   findByPath(path: string): string | undefined
   /** Makes a document current. */
@@ -131,9 +131,10 @@ export class DocumentSet implements DocumentHost {
     return e
   }
 
-  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}): string {
+  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean } = {}): string {
     const prev = this.current()
     const entry = this.addEntry(doc, opts.path ?? null, opts.exportTo, false)
+    if (opts.dirty) entry.edits = 1 // unsaved work handed over by another engine (savedEdits stays 0)
     if (prev.placeholder && prev.edits === 0 && !prev.session.turnActive) this.entries = this.entries.filter((e) => e !== prev)
     // keep memory bounded: drop the oldest clean document that is not the current one
     while (this.entries.length > this.maxDocuments) {
@@ -142,6 +143,12 @@ export class DocumentSet implements DocumentHost {
       this.entries = this.entries.filter((e) => e !== victim)
     }
     return entry.documentId
+  }
+
+  /** The blank starting document nobody touched: nothing to hand over. */
+  isUntouched(documentId: string): boolean {
+    const e = this.resolve(documentId) as Entry
+    return e.placeholder && e.edits === 0
   }
 
   findByPath(path: string): string | undefined {
@@ -178,7 +185,7 @@ export class DocumentSet implements DocumentHost {
 // ---------------------------------------------------------------- helpers used by the tools
 
 /** Adds a document to the host (it becomes current); without a host it replaces the single document. */
-export function addDocument(ctx: ToolContext, doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}): string {
+export function addDocument(ctx: ToolContext, doc: Document, opts: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean } = {}): string {
   if (ctx.documents) return ctx.documents.add(doc, opts)
   ctx.session.replaceDocument(doc, { label: `Open ${doc.name}` })
   return ctx.session.doc.id

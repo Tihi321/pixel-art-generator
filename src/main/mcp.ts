@@ -38,6 +38,8 @@ export interface McpHttpServerOptions {
   onStatus?: (status: McpStatus) => void
   /** Log sink (default: ignore). */
   log?: (msg: string) => void
+  /** Extra POST endpoints by exact path (e.g. headless `/engine/handover`): same Host, Origin and token checks as `/mcp`. */
+  routes?: Record<string, (req: IncomingMessage, res: ServerResponse) => Promise<void>>
 }
 
 const MAX_BODY = 64 * 1024 * 1024
@@ -186,8 +188,9 @@ export class McpHttpServer {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const path = (req.url ?? '').split('?')[0]
-    if (path !== '/mcp') {
+    const path = (req.url ?? '').split('?')[0]!
+    const route = this.opts.routes?.[path]
+    if (path !== '/mcp' && !route) {
       this.json(res, 404, { error: 'Not found. The MCP endpoint is /mcp.' })
       return
     }
@@ -197,6 +200,11 @@ export class McpHttpServer {
     }
     if (!this.authorized(req)) {
       this.rpcError(res, 401, -32001, 'Unauthorized: missing or invalid bearer token.', { 'WWW-Authenticate': 'Bearer' })
+      return
+    }
+    if (route) {
+      if (req.method !== 'POST') res.writeHead(405, { Allow: 'POST' }).end()
+      else await route(req, res)
       return
     }
     const sid = req.headers['mcp-session-id']
