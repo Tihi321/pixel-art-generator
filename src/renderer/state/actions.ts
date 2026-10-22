@@ -33,7 +33,7 @@ import {
   getBuiltinPalette,
   serializeProject
 } from '../../core'
-import { type DocumentHost, type ExportTarget, exportToTarget } from '../../tools/documents'
+import { type DocumentHost, type ExportTarget, UNSAVED_CLOSE_MESSAGE, exportToTarget } from '../../tools/documents'
 import { EditorSession } from '../../tools/session'
 import { decodeText, readFile, resolveProjectPath, writeFile } from '../lib/files'
 import { createIpcServices } from '../toolBridgeClient'
@@ -334,7 +334,7 @@ export const workspaceDocuments: DocumentHost = {
     if (!tab) throw new Error(`Unknown document "${documentId}". Call list_documents to see the open documents.`)
     return { documentId: tab.id, session: tab.session, path: tab.projectPath, exportTo: tab.exportTo }
   },
-  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}) {
+  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean } = {}) {
     const path = opts.path ?? null
     const active = workspace.active
     if (active.session.turnActive) {
@@ -347,7 +347,7 @@ export const workspaceDocuments: DocumentHost = {
     const tab = workspace.active
     tab.exportTo = opts.exportTo
     // a document that exists only in memory is unsaved work: it is not "pristine" and closing it asks first
-    if (path === null) {
+    if (path === null || opts.dirty) {
       tab.edits = Math.max(tab.edits, 1)
       tab.savedEdits = 0
     }
@@ -369,5 +369,14 @@ export const workspaceDocuments: DocumentHost = {
     if (!tab) return
     workspace.markSaved(path, tab)
     if (workspace.activeId === tab.id) useUi.getState().set({ projectPath: path })
+  },
+  close(documentId, opts = {}) {
+    const tab = workspace.find(documentId)
+    if (!tab) throw new Error(`Unknown document "${documentId}". Call list_documents to see the open documents.`)
+    // no confirm dialog from a tool: unsaved work needs force (workspace.close refuses a tab the agent works in)
+    if (workspace.isDirty(tab) && !opts.force) throw new Error(UNSAVED_CLOSE_MESSAGE(tab.id, tab.session.doc.name))
+    const wasActive = tab.id === workspace.activeId
+    workspace.close(tab.id)
+    if (wasActive) showActiveTab()
   }
 }

@@ -7,7 +7,9 @@ import {
   deserializeProject,
   serializeProject
 } from '../../core'
+import { addDocument, resolveDocument } from '../documents'
 import { defineTool, jsonResult } from '../registry'
+import { withJson } from './studio'
 import type { EditorSession } from '../session'
 import {
   FRAME_REF_DESC,
@@ -26,12 +28,13 @@ import {
 } from '../util'
 
 /** Compact JSON-able summary of the document (also used for the agent's system context). */
-export function summarizeDocument(session: EditorSession): Record<string, unknown> {
+export function summarizeDocument(session: EditorSession, documentId?: string): Record<string, unknown> {
   const doc = session.doc
   const celCount = (layerId: string): number => doc.frames.filter((f) => doc.cels.has(`${layerId}:${f.id}`)).length
   return {
     name: doc.name,
     id: doc.id,
+    ...(documentId ? { documentId } : {}),
     width: doc.width,
     height: doc.height,
     palette: { id: doc.palette.id, name: doc.palette.name, size: doc.palette.colors.length, colors: summarizePaletteColors(doc.palette) },
@@ -65,15 +68,17 @@ export const documentTools = [
     group: 'document',
     readOnly: true,
     description:
-      'Summary of the open document as JSON: canvas size, palette (with indices), layers (index, id, name, visible/locked/opacity/blend, how many frames have pixels), frames (index, id, duration), animation tags, the active layer/frame, style references. Call this first, and again whenever you are unsure of the current state.',
+      'Summary of the document as JSON: documentId, canvas size, palette (with indices), layers (index, id, name, visible/locked/opacity/blend, how many frames have pixels), frames (index, id, duration), animation tags, the active layer/frame, style references. Call this first, and again whenever you are unsure of the current state.',
     input: obj({}),
-    handler: (_args, { session }) => jsonResult(summarizeDocument(session))
+    handler: (_args, { session, documentId }) => jsonResult(summarizeDocument(session, documentId))
   }),
 
   defineTool({
     name: 'new_document',
     group: 'document',
-    description: `Create a new empty document (1 transparent layer, 1 frame) and make it the open document. The previous document is replaced; this can be undone with undo. Example: {"width":32,"height":32,"name":"knight","palette":"endesga-32"}. Max size ${MAX_DIMENSION}x${MAX_DIMENSION}, but 16x16 to 64x64 is the sweet spot for pixel art.`,
+    document: false,
+    readOnly: true,
+    description: `Create a new empty document (1 transparent layer, 1 frame) and make it the current document. The other open documents stay open (see list_documents, select_document, close_document). Returns text and JSON {documentId,name,width,height,palette}. Example: {"width":32,"height":32,"name":"knight","palette":"endesga-32"}. Max size ${MAX_DIMENSION}x${MAX_DIMENSION}, but 16x16 to 64x64 is the sweet spot for pixel art.`,
     input: obj({
       width: z.number().int().min(1).max(MAX_DIMENSION).describe('Canvas width in pixels.'),
       height: z.number().int().min(1).max(MAX_DIMENSION).describe('Canvas height in pixels.'),
@@ -87,10 +92,11 @@ export const documentTools = [
       const palette = args.palette ? await findPalette(ctx, args.palette) : undefined
       if (args.palette && !palette) throw paletteNotFound(args.palette)
       const doc = createDocument({ width: args.width, height: args.height, name: args.name, palette: palette ?? undefined })
-      ctx.session.replaceDocument(doc, { label: `New document ${args.width}x${args.height}` })
-      const d = ctx.session.doc
-      return ok(
-        `Created document "${d.name}" ${d.width}x${d.height} with palette "${d.palette.name}" (${d.palette.colors.length} colors), 1 layer "${d.layers[0]!.name}" (id ${d.layers[0]!.id}) and 1 frame (id ${d.frames[0]!.id}).`
+      const documentId = addDocument(ctx, doc)
+      const d = resolveDocument(ctx, documentId).session.doc
+      return withJson(
+        `Created document "${d.name}" ${d.width}x${d.height} (id ${documentId}, now current) with palette "${d.palette.name}" (${d.palette.colors.length} colors), 1 layer "${d.layers[0]!.name}" (id ${d.layers[0]!.id}) and 1 frame (id ${d.frames[0]!.id}).`,
+        { documentId, name: d.name, width: d.width, height: d.height, palette: d.palette.colors.map((c) => c.hex) }
       )
     }
   }),
@@ -134,16 +140,28 @@ export const documentTools = [
   defineTool({
     name: 'open_project',
     group: 'document',
+    document: false,
+    readOnly: true,
     description:
-      'Open a Pixel Studio project file (.pxs) as the current document. The previous document is replaced (undoable with undo). Give an absolute path, or a file name inside ~/PixelStudio/projects.',
+      'Open a Pixel Studio project file (.pxs) as a new document and make it the current document; the other open documents stay open (a project that is already open is just made current). Give an absolute path, or a file name inside ~/PixelStudio/projects. Returns text and JSON {documentId,name,width,height,path}.',
     input: obj({ path: z.string().min(1).describe('Path of the .pxs file (absolute, or relative to ~/PixelStudio/projects).') }),
-    handler: async ({ path }, { session, services }) => {
-      const full = await services.resolveProjectPath(withExtension(path, 'pxs'))
-      const bytes = await services.readFile(full)
-      const doc = deserializeProject(new TextDecoder().decode(bytes))
-      session.replaceDocument(doc, { label: `Open ${full}` })
-      const d = session.doc
-      return ok(`Opened "${d.name}" ${d.width}x${d.height} from ${full}: ${d.layers.length} layer(s), ${d.frames.length} frame(s), ${d.tags.length} tag(s).`)
+    handler: async ({ path }, ctx) => {
+      const full = await ctx.services.resolveProjectPath(withExtension(path, 'pxs'))
+      const open = ctx.documents?.findByPath(full)
+      let documentId: string
+      if (open && ctx.documents) {
+        ctx.documents.activate(open)
+        documentId = open
+      } else {
+        const bytes = await ctx.services.readFile(full)
+        const doc = deserializeProject(new TextDecoder().decode(bytes))
+        documentId = addDocument(ctx, doc, { path: full })
+      }
+      const d = resolveDocument(ctx, documentId).session.doc
+      return withJson(
+        `Opened "${d.name}" ${d.width}x${d.height} from ${full} as document ${documentId} (now current): ${d.layers.length} layer(s), ${d.frames.length} frame(s), ${d.tags.length} tag(s).`,
+        { documentId, name: d.name, width: d.width, height: d.height, path: full }
+      )
     }
   }),
 

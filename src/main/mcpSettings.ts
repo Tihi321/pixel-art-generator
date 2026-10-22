@@ -79,6 +79,10 @@ export interface RegisterMcpOptions {
   /** Push `McpState` to the window (channel MCP_IPC.statusChanged). */
   send?: (channel: string, state: McpState) => void
   log?: (msg: string) => void
+  /** The server stays off this run and Settings shows this text as the error (another engine serves MCP). */
+  blocked?: string
+  /** This run only: serve on this port with MCP enabled, whatever mcp.json and PIXEL_STUDIO_MCP_PORT say (a take-over keeps the old engine's address). Never written to mcp.json. */
+  port?: number
 }
 
 export interface McpController {
@@ -108,6 +112,11 @@ export function registerMcp(ipc: McpIpc, host: McpHost, opts: RegisterMcpOptions
 
   const startServer = async (): Promise<void> => {
     await stopServer()
+    if (opts.blocked) {
+      status = { running: false, url: null, error: opts.blocked, sessions: 0 }
+      push()
+      return
+    }
     if (!settings.enabled) {
       push()
       return
@@ -150,6 +159,7 @@ export function registerMcp(ipc: McpIpc, host: McpHost, opts: RegisterMcpOptions
   return {
     async start() {
       settings = withEnvOverrides(await loadMcpSettings(configDir))
+      if (opts.port !== undefined) settings = { ...settings, enabled: true, port: opts.port }
       await startServer()
       return getState()
     },

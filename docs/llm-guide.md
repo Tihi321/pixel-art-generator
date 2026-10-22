@@ -5,14 +5,15 @@ You are driving Pixel Studio, a pixel-art editor with layers, animation frames, 
 <!-- short:start -->
 Pixel Studio quick guide
 - Canvas: origin (0,0) is top-left, x goes right, y goes down. Layers and frames are addressed by id, name or 0-based index. Edits go to the active layer and frame unless `layer` / `frame` are given.
-- Workflow: `get_document` -> pick a palette (`list_palettes`, `load_palette`, or `set_palette` for your own) -> sketch the silhouette with `draw_grid` -> shade -> outline -> `render_preview` to check -> fix -> export.
-- `draw_grid`: rows of text, one character per pixel, plus a legend {char: "#hex" | palette index | null}. Max 64x64 per call; use x,y to place it. `read_grid` returns pixels in the same format.
-- Use only palette colours and hue-shifted ramps (shadows cooler, highlights warmer). Keep sprites small (16-64 px).
-- Animation: `duplicate_frame`, then edit only the differences; keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8, attack 3-6); `set_frame_duration` in ms.
+- Workflow: `get_document` -> pick a palette (`list_palettes`, `load_palette`, `set_palette`) -> sketch the silhouette with `draw_grid` -> shade -> outline -> `render_preview` -> fix -> export.
+- `draw_grid`: rows of text, one character per pixel, plus a legend {char: "#hex" | palette index | null}. Max 256x256 per call; use x,y to place it. `read_grid` returns pixels in the same format.
+- Big scenes: `draw_gradient` (sky), `draw_polygon {filled:true}` (hills), `draw_image` (a PNG). Text: `draw_text`, `measure_text`.
+- Use only palette colours and hue-shifted ramps (shadows cooler, highlights warmer). Keep sprites small.
+- Animation: `duplicate_frame`, edit only the differences, keep pixel counts stable; name loops with `create_tag` (idle 2-4 frames, walk 4-8); `set_frame_duration` in ms.
 - References: if `get_document` lists `references`, call `get_style_context` first and use exactly its palette. Library: `list_assets`, `place_asset`, `save_as_asset`.
 - Export: `export_png` (`width`+`height` = exact size), `export_spritesheet`, `export_gif`. `undo` / `redo` fix mistakes.
-- Images: `import_image` makes pixel art from a PNG in a new document (`list_documents`, `document` ids).
-- Errors come back as text: read them and correct the call.
+- `import_image` makes pixel art from a PNG in a new document. Every tool takes an optional `document` id (`list_documents`).
+- Errors come back as text: read and fix the call.
 <!-- short:end -->
 
 ## Coordinates and layers
@@ -49,9 +50,44 @@ Pixel Studio quick guide
 - One character is one pixel. All rows must have the same length. The grid's top-left lands at (x, y).
 - The legend maps a character to a hex colour, a palette index, or null for transparent. Without a legend, characters are palette indices: 0-9, then a-z, then A-Z, and "." is transparent. These are the same characters `read_grid` prints.
 - Transparent cells leave existing pixels alone. Pass `"transparent": "clear"` when the grid should replace its rectangle completely (erasing as well).
-- Keep each call at 64x64 characters or smaller. For bigger art send several grids with different x and y.
+- Keep each call at 256x256 characters or smaller. For bigger art send several grids with different x and y, or use the bulk tools below.
 - Edit existing art with `read_grid` (it returns `legend` and `rows`), change a few characters, and send it back with `draw_grid` using `"transparent":"clear"`.
 - For small touch-ups use `set_pixels`. Other tools: `draw_line`, `draw_rect`, `draw_ellipse`, `flood_fill`, `replace_color`, `clear_cel`, and `transform_cel` (flip, rotate, shift).
+
+## Big scenes: gradients, polygons and whole images
+
+A 320x180 background should take a handful of calls, not hundreds of grids.
+
+- `draw_gradient {stops, direction?, dither?, mask?, x?, y?, w?, h?}`: stops are `{at: 0..1, color}`. `direction` is "vertical" (default), "horizontal", "diagonal", "radial" or an angle in degrees (0 = left to right, 90 = top to bottom). `dither` "ordered" (default, 4x4 Bayer) or "ordered8" mixes only the neighbouring stop colors, so the result stays pixel art; "checker" and "none" make hard bands; "smooth" blends true colors and adds many colors (not pixel art). `mask` "transparent" paints only empty pixels (a sky behind hills), "opaque" only existing pixels (shading).
+- `draw_polygon {points, color, filled?, thickness?, closed?}`: points are `[x, y]` or `{x, y}`, up to 1024. Use `filled:true` for every closed shape (hills, mountains, roofs); line + `flood_fill` leaks or leaves gaps. The outline is drawn through the vertices, so two polygons sharing an edge leave no gap. Self-crossing outlines follow the even-odd rule. `closed:false` draws a polyline.
+- `draw_image {png | path, x?, y?, transparent?, snap?, dither?}`: paints a whole base64 PNG (or an image file) at once, for example a foreground you composed in code. Alpha is binary (>= 128 is opaque). `snap:"palette"` remaps to the document palette; otherwise the result tells you how many colors are outside it.
+
+Example sequence for a 320x180 scene on separate layers: `new_document {"width":320,"height":180,"palette":"db32"}`, then `draw_gradient` for the sky (ordered dither), three `draw_polygon` calls with `filled:true` for hills from far (light) to near (dark), and `draw_image` for the foreground. Check with `render_preview` or `export_png`.
+
+## Text
+
+Never draw letters by hand. `draw_text {text, x, y, color, font?, align?, maxWidth?, letterSpacing?, lineSpacing?, scale?, outline?, shadow?}` writes crisp pixel text with its top-left at (x, y) on the active layer or the given `layer`/`frame`.
+
+- Fonts: "small" (default) has 5x7 capitals, real lowercase with descenders and a 10 px line pitch; "tiny" has 3x5 letters with a 6 px line pitch and no lowercase (it draws small caps), for labels on small canvases. Both cover printable ASCII; accented Latin letters draw as their base letter and any other character as a hollow box (the result says how many).
+- `
+` starts a new line. `maxWidth` wraps at spaces (in canvas pixels); `align` "center" or "right" places lines inside `maxWidth` (or the widest line). `scale` 1-8 enlarges the font in whole pixels (a title at scale 2-3 stays crisp). `letterSpacing` (default 1) and `lineSpacing` are in font pixels.
+- `outline` is a color for a one-font-pixel outline, `shadow` is `{color, dx?, dy?}`; both keep the text readable on busy backgrounds. Use palette colors.
+- `measure_text` takes the same text options and returns `{width, height, lines}` without drawing. Center a title with `x = (canvas width - width) / 2`.
+
+Example: `draw_text {"text":"Chapter 1
+The Lake","x":60,"y":20,"color":"#fff1e8","font":"small","scale":2,"align":"center","maxWidth":200,"outline":"#1a1c2c"}`.
+
+## UI for visual novels
+
+A VN needs a textbox, a name box, choice buttons and panels as PNGs. Ren'Py draws them with `Frame("file.png", left, top, right, bottom)`: the borders keep their size and the middle stretches or tiles, so one small image fits any size.
+
+- `draw_ui_element {kind, x, y, w, h, style?, state?, label?, font?, labelColor?, align?}` draws one. `kind` is "textbox", "namebox" (a tab: top corners only), "button", "choice" (a wide button), "panel" or "frame" (border only). With just kind and a rectangle it already fits the palette (darkest color = border, a neutral mid color = fill, neighbouring colors = bevel, the lightest or darkest color for the label by contrast). Optional `style`: `fill, border, light, dark, shadow, corner` ("round" default, "cut", "square"), `borderWidth` 1-4, `inset` (inner line), `pattern` ("dither", "stripes").
+- Buttons and choices take `state`: "idle", "hover" (lighter fill), "pressed" (darker, bevel inverted, label 1 px down), "disabled" (grey, no bevel). Draw all four at the same size. `label` uses the built-in fonts: centered on buttons and name boxes, top-left and wrapped on a textbox or panel.
+- The result gives the 9-slice borders `{left, top, right, bottom}`, a ready `Frame("textbox.png", 6, 6, 6, 6)` line and the same as JSON. Use those numbers; they are measured from the drawing.
+- Workflow: one document per element (a textbox 320x64, a name box 64x20, buttons 96x24 on frames 0-3 or one sheet), then `export_png` (or `export_many`) with the matching file name, and put the reported borders into the Ren'Py `Frame(...)`.
+- `draw_nine_slice {source:{x,y,w,h}, insets, x, y, w, h, center?, edges?}` resizes a hand-drawn frame: corners are copied 1:1, edges and middle `"tile"` (default; keeps the pixel pattern) or `"stretch"`. `insets` is one number or `{left,top,right,bottom}`. The source may be on another layer, frame or `document`.
+
+Example: `draw_ui_element {"kind":"choice","x":0,"y":0,"w":160,"h":22,"label":"Go to the beach","state":"hover"}`, then the same call with "pressed".
 
 ## Palette and colour rules
 
@@ -86,14 +122,24 @@ The asset library holds finished art (kinds: character, background, tile, prop),
 
 ## Several documents, images and VN Studio
 
-Pixel Studio can hold several documents at once (tabs in the window, an in-memory set when it runs headless). Every document has a `documentId`; `list_documents` shows them. All drawing tools work on the **current** document, and tools that create a document (`import_image`, `draw_sprite_from_reference`, `open_document`) make the new one current. `export_png` and `export_many` take a `document` id, so you can export an earlier one without switching.
+Pixel Studio can hold several documents at once (tabs in the window, an in-memory set when it runs headless). Every document has a `documentId`; `list_documents` shows them. Documents are independent: `new_document`, `open_project`, `open_document`, `import_image` and `draw_sprite_from_reference` ADD a document (it becomes the current one) and never replace another. **Every tool that works on a document takes an optional `document` id** (default: the current document). When several clients or agents work at once, pass `document` on every call, because another client may have made a different document current in the meantime. `select_document {document}` makes a document current; `close_document {document, force?}` closes one (a document with unsaved changes needs `force` or a `save_document` first; closing the last one leaves a blank 32x32 document). `new_document` returns the `documentId` in its JSON item.
 
-- `import_image {path, width, height, palette, dither, outline, cleanup}`: converts a PNG (or JPEG when the app can decode it) to clean pixel art in a new document: area-average downscale that respects transparency, alpha threshold, snap to the palette (`none`, `ordered` or `floyd` dithering; transparent pixels are never dithered), removal of orphan single pixels, optional 1 px `outline` (`true` = the darkest palette colour, or a hex colour). Without `palette`, `maxColors` (default 32) colours are picked from the image. Max 512x512. Example: `{"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}`.
+- `import_image {path, width, height, palette, dither, outline, cleanup}`: converts a PNG, JPEG, WebP (and GIF/BMP/AVIF) image (PNG only in plain Node; the app and headless mode read the rest) to clean pixel art in a new document: area-average downscale that respects transparency, alpha threshold, snap to the palette (`none`, `ordered` or `floyd` dithering; transparent pixels are never dithered), removal of orphan single pixels, optional 1 px `outline` (`true` = the darkest palette colour, or a hex colour). Without `palette`, `maxColors` (default 32) colours are picked from the image. Max 2048x2048 (a 1920x1080 background imports directly). Example: `{"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}`.
 - `export_png {width, height}`: an exact output size with nearest-neighbour scaling, not only integer factors. A 320x180 document exported at `1920x1080` is a clean 6x. `export_many {items:[{document, path, width, height, frame}]}` writes several files in one call.
 - `draw_sprite_from_reference {reference, width, height, palette, expression}`: for chibi or retro sprites up to 128x128. It makes a new document with the reference as a dimmed, locked, never-exported reference layer. You then paint the layer "Sprite" with `draw_grid`, compare with `render_preview`, and export.
 - `open_document {path, exportTo, exportWidth, exportHeight}` opens a `.pxs` project or a PNG. With `exportTo` every `save_document` (and Ctrl+S in the window) also writes the PNG there, so edits flow back to the app that asked for them. `save_document {document, path}` saves the project.
 - The new and changed tools end their result with one JSON object (documentId, size, paths, ...) after the readable text.
 - **Headless:** `yarn mcp` (`electron . --mcp-only [--port N]`, after `yarn build`) serves the same tools at `http://127.0.0.1:7457/mcp` with no window. In the window app, `--open <path> [--export-to <path>] [--export-width W --export-height H]` opens a document in the running or a new window.
+
+## VN expression sets
+
+A visual-novel character needs one transparent sprite per expression (VN Studio defaults: neutral, happy, sad, angry, surprised, worried, scared, thinking; names are lowercase letters and digits), bottom-aligned and all the same size. Keep them in ONE document: the body once, one frame per expression, only the face redrawn.
+
+1. Draw the finished base pose (whole figure, neutral face) on the "Sprite" layer.
+2. `make_expression_set {expressions:["neutral","happy","sad"], face:{x,y,w,h}}`: the base frame becomes the first expression, every other expression is a copy of it with all layers, and each frame gets a one-frame tag with the expression name. It is one undo step; call it again with more names to add expressions (existing ones are kept). `face` is optional (where the face is; it only appears in the guidance). The result lists what to change per expression (brows, eyes, mouth, head tilt).
+3. Frames are addressed by expression name: `{"frame":"happy"}` works in `draw_grid`, `render_preview`, `export_png`, `set_active` and every other tool that takes a frame (an id or a number still means the id or index). Per expression: `render_preview {frame:"happy"}`, then `draw_grid` on the face region with `frame:"happy"` (cover the old brows, eyes and mouth with the skin colour first).
+4. `export_expression_set {dir, prefix, height}` writes `<dir>/<prefix>_<expression>.png` for every expression, all at one size (nearest neighbour, exact `width`/`height` or integer `scale`; reference and hidden layers are not exported). Example: `{"dir":"C:/vn/mara","prefix":"mara","height":384}` gives `mara_neutral.png`, `mara_happy.png`, ...
+- `draw_sprite_from_reference {..., expressions:["neutral","happy"]}` creates the set together with the document (the frames are empty: draw the figure on the first one, then `copy_cel` it to the others).
 
 ## Export
 

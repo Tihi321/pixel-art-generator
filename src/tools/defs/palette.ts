@@ -117,6 +117,7 @@ export const paletteTools = [
   defineTool({
     name: 'list_palettes',
     group: 'palette',
+    document: false,
     readOnly: true,
     description:
       'List the palettes you can load: built-ins (PICO-8, DB32, Endesga 32/64, Sweetie 16, Game Boy, NES, CGA, ...) and palettes the user saved. Each has an id, name and size. Use load_palette / new_document / remap_to_palette with the id or name.',

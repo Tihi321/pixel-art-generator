@@ -3,9 +3,10 @@
 
 import { z } from 'zod'
 import type { ToolDef, ToolHost, ToolResult, TurnToolHost } from '../shared/tools'
-import type { DocumentHost } from './documents'
+import { type DocumentHost, resolveDocument } from './documents'
 import type { EditorSession } from './session'
 import type { ToolServices } from './services'
+import { DOCUMENT_DESC } from './util'
 
 export type { ToolDef, ToolHost, ToolResult, TurnToolHost }
 
@@ -16,6 +17,8 @@ export interface ToolContext {
   services: ToolServices
   /** The open documents (multi-document hosts). `session` is the current one. Absent in single-document hosts. */
   documents?: DocumentHost
+  /** The id of the document `session` belongs to. Set by the registry for tools that act on a document. */
+  documentId?: string
   signal?: AbortSignal
 }
 
@@ -30,6 +33,8 @@ export interface ToolDefinition<S extends z.ZodType = z.ZodType> {
   readOnly?: boolean
   /** True for undo/redo: do not wrap the call in a transaction. Default false. */
   noTransaction?: boolean
+  /** `false` for tools that do not act on a document (they create or list documents): no `document` argument is added. */
+  document?: false
   handler(args: z.output<S>, ctx: ToolContext): ToolResult | Promise<ToolResult>
 }
 
@@ -41,16 +46,25 @@ export interface RegisteredTool {
   input: z.ZodType
   readOnly: boolean
   noTransaction: boolean
+  /** True when the tool acts on a document: it takes an optional `document` id and runs on that document's session. */
+  targetsDocument: boolean
   handler(args: unknown, ctx: ToolContext): ToolResult | Promise<ToolResult>
 }
 
 export function defineTool<S extends z.ZodType>(def: ToolDefinition<S>): RegisteredTool {
   if (!/^[a-z_]+$/.test(def.name)) throw new Error(`Invalid tool name "${def.name}": use lowercase letters and underscores.`)
+  let input: z.ZodType = def.input
+  const targetsDocument = def.document !== false
+  // every document tool takes an optional `document` (unless it declares its own); extend() keeps the object strict
+  if (targetsDocument && input instanceof z.ZodObject && !('document' in input.shape)) {
+    input = input.extend({ document: z.string().optional().describe(DOCUMENT_DESC) })
+  }
   return {
     name: def.name,
     description: def.description,
     group: def.group,
-    input: def.input,
+    input,
+    targetsDocument,
     readOnly: def.readOnly ?? false,
     noTransaction: def.noTransaction ?? false,
     handler: def.handler as RegisteredTool['handler']
@@ -204,10 +218,22 @@ export class ToolRegistry {
     if (!parsed.success) return errorResult(formatZodError(name, parsed.error))
     if (ctx.signal?.aborted) return errorResult(`${name} was cancelled before it ran.`)
 
-    const run = async (): Promise<ToolResult> => tool.handler(parsed.data, ctx)
+    // run on the addressed document (default: the current one); an unknown id never touches anything
+    let callCtx = ctx
+    if (tool.targetsDocument) {
+      try {
+        const id = (parsed.data as { document?: unknown } | null)?.document
+        const ref = resolveDocument(ctx, typeof id === 'string' ? id : undefined)
+        callCtx = { ...ctx, session: ref.session, documentId: ref.documentId }
+      } catch (e) {
+        return errorResult(`${name} failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+
+    const run = async (): Promise<ToolResult> => tool.handler(parsed.data, callCtx)
     try {
       if (tool.readOnly || tool.noTransaction) return await run()
-      return await ctx.session.transactionAsync(`${name}`, async () => {
+      return await callCtx.session.transactionAsync(`${name}`, async () => {
         const result = await run()
         if (result.isError) throw new RollbackSignal(result)
         return result

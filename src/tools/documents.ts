@@ -12,7 +12,7 @@ import { frameImage } from '../core/convert'
 import type { ToolContext } from './registry'
 import { EditorSession } from './session'
 import type { ToolServices } from './services'
-import { withExtension } from './util'
+import { resolveFrame, withExtension } from './util'
 
 export interface ExportTarget {
   /** Absolute path (a relative name goes to ~/PixelStudio/exports). */
@@ -44,8 +44,8 @@ export interface DocumentHost {
   list(): DocumentInfo[]
   /** The document with this id (default: the current one). Throws "Unknown document" otherwise. */
   resolve(documentId?: string): DocumentRef
-  /** Adds a document and makes it current. Returns its id. */
-  add(doc: Document, opts?: { path?: string | null; exportTo?: ExportTarget }): string
+  /** Adds a document and makes it current. Returns its id. `dirty` opens it with unsaved changes (even when it has a path). */
+  add(doc: Document, opts?: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean }): string
   /** The document with this native project path, if it is open. */
   findByPath(path: string): string | undefined
   /** Makes a document current. */
@@ -53,7 +53,15 @@ export interface DocumentHost {
   setExportTarget(documentId: string, target: ExportTarget | undefined): void
   /** The document was saved to `path`: remember it and clear the dirty flag. */
   markSaved(documentId: string, path: string): void
+  /**
+   * Closes a document. A document with unsaved changes needs `force`. Closing the current one makes another
+   * current; closing the last one leaves a fresh blank document. Throws when the document cannot be closed.
+   */
+  close(documentId: string, opts?: { force?: boolean }): void
 }
+
+export const UNSAVED_CLOSE_MESSAGE = (documentId: string, name: string): string =>
+  `Document ${documentId} ("${name}") has unsaved changes. Call save_document first, or pass force=true to close it anyway.`
 
 // ---------------------------------------------------------------- DocumentSet (headless)
 
@@ -123,9 +131,10 @@ export class DocumentSet implements DocumentHost {
     return e
   }
 
-  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}): string {
+  add(doc: Document, opts: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean } = {}): string {
     const prev = this.current()
     const entry = this.addEntry(doc, opts.path ?? null, opts.exportTo, false)
+    if (opts.dirty) entry.edits = 1 // unsaved work handed over by another engine (savedEdits stays 0)
     if (prev.placeholder && prev.edits === 0 && !prev.session.turnActive) this.entries = this.entries.filter((e) => e !== prev)
     // keep memory bounded: drop the oldest clean document that is not the current one
     while (this.entries.length > this.maxDocuments) {
@@ -134,6 +143,12 @@ export class DocumentSet implements DocumentHost {
       this.entries = this.entries.filter((e) => e !== victim)
     }
     return entry.documentId
+  }
+
+  /** The blank starting document nobody touched: nothing to hand over. */
+  isUntouched(documentId: string): boolean {
+    const e = this.resolve(documentId) as Entry
+    return e.placeholder && e.edits === 0
   }
 
   findByPath(path: string): string | undefined {
@@ -154,9 +169,27 @@ export class DocumentSet implements DocumentHost {
     e.path = path
     e.savedEdits = e.edits
   }
+
+  close(documentId: string, opts: { force?: boolean } = {}): void {
+    const e = this.resolve(documentId) as Entry
+    if (e.edits !== e.savedEdits && !opts.force) throw new Error(UNSAVED_CLOSE_MESSAGE(e.documentId, e.session.doc.name))
+    if (e.session.turnActive) throw new Error(`Document ${e.documentId} is in use by an agent turn and cannot be closed now.`)
+    const wasCurrent = e === this.current()
+    this.entries = this.entries.filter((x) => x !== e)
+    // the most recently added remaining document becomes current; the last one leaves a blank placeholder
+    if (this.entries.length === 0) this.addEntry(createDocument({ width: 32, height: 32, name: 'Untitled' }), null, undefined, true)
+    else if (wasCurrent) this.currentIdValue = this.entries[this.entries.length - 1]!.documentId
+  }
 }
 
 // ---------------------------------------------------------------- helpers used by the tools
+
+/** Adds a document to the host (it becomes current); without a host it replaces the single document. */
+export function addDocument(ctx: ToolContext, doc: Document, opts: { path?: string | null; exportTo?: ExportTarget; dirty?: boolean } = {}): string {
+  if (ctx.documents) return ctx.documents.add(doc, opts)
+  ctx.session.replaceDocument(doc, { label: `Open ${doc.name}` })
+  return ctx.session.doc.id
+}
 
 /** The document a tool call addresses: `documentId`, else the current one. Works without a host too. */
 export function resolveDocument(ctx: ToolContext, documentId?: string): DocumentRef {
@@ -186,8 +219,7 @@ export async function writeDocumentPng(
   opts: WritePngOptions = {}
 ): Promise<{ path: string; width: number; height: number; frame: number }> {
   const doc = session.doc
-  const frame = opts.frame === undefined ? session.activeFrame : (doc.frames.find((f) => f.id === opts.frame) ?? doc.frames[Number(opts.frame)])
-  if (!frame) throw new Error(`Frame ${JSON.stringify(opts.frame)} not found.`)
+  const frame = resolveFrame(session, opts.frame)
   const img = frameImage(doc, frame.id, opts)
   const full = await services.resolveExportPath(withExtension(target, 'png'))
   await services.writeFile(full, encodePng(img))

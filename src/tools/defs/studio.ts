@@ -22,14 +22,16 @@ import {
   paletteToRgba,
   parseHexColor,
   rasterToCel,
+  requireTag,
   rgbaToHex,
   serializeProject,
   MAX_IMPORT_SIDE
 } from '../../core'
 import type { ToolResult } from '../../shared/tools'
-import { type ExportTarget, exportToTarget, resolveDocument, writeDocumentPng } from '../documents'
+import { type ExportTarget, addDocument, exportToTarget, resolveDocument, writeDocumentPng } from '../documents'
 import { type ToolContext, defineTool, textResult } from '../registry'
-import { findPalette, obj, paletteNotFound, pathStem, plural, safeFileName, withExtension } from '../util'
+import { applyExpressionSet, expressionGuidance, expressionNames, expressionTags, faceRegion } from '../expressions'
+import { DOCUMENT_DESC, FRAME_REF_DESC, findPalette, fmtRect, frameRef, obj, paletteNotFound, pathStem, plural, resolveFrame, safeFileName, withExtension } from '../util'
 
 /** Human text first, then one JSON object as the LAST content item (the VN Studio contract). */
 export function withJson(text: string, json: Record<string, unknown>): ToolResult {
@@ -38,9 +40,9 @@ export function withJson(text: string, json: Record<string, unknown>): ToolResul
   return r
 }
 
-const IMAGE_EXT = /\.(png|jpe?g|webp)$/i
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|avif)$/i
 
-/** PNG natively; JPEG/WebP through `services.decodeImage` when the host has one. */
+/** PNG natively; JPEG/WebP/GIF/BMP/AVIF through `services.decodeImage` when the host has one. */
 export async function decodeImageFile(ctx: ToolContext, path: string): Promise<RgbaImage> {
   const bytes = await ctx.services.readFile(path)
   if (hasPngSignature(bytes)) return decodePng(bytes)
@@ -73,27 +75,21 @@ function describeSize(doc: Document): string {
   return `${doc.width}x${doc.height}`
 }
 
-/** Adds a document to the host (it becomes current); without a host it replaces the single document. */
-function addDocument(ctx: ToolContext, doc: Document, opts: { path?: string | null; exportTo?: ExportTarget } = {}): string {
-  if (ctx.documents) return ctx.documents.add(doc, opts)
-  ctx.session.replaceDocument(doc, { label: `Open ${doc.name}` })
-  return ctx.session.doc.id
-}
-
 const pngSafeName = (name: string): string => safeFileName(name)
 
 export const studioTools = [
   defineTool({
     name: 'import_image',
     group: 'documents',
+    document: false,
     readOnly: true,
     description:
-      `Turn an image file (PNG always; JPEG/WebP when the app can decode them) into a pixel-art document: area-average downscale (alpha-aware, so transparent backgrounds do not bleed into the edges) -> alpha threshold -> remap to a palette with optional dithering (transparent pixels are never dithered) -> orphan-pixel cleanup -> optional 1 px outline. The result is a NEW document with one pixel layer, and it becomes the current document. Max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}. ` +
+      `Turn an image file (PNG always; JPEG, WebP and GIF/BMP/AVIF in the app and in headless mode, not in plain Node) into a pixel-art document: area-average downscale (alpha-aware, so transparent backgrounds do not bleed into the edges) -> alpha threshold -> remap to a palette with optional dithering (transparent pixels are never dithered) -> orphan-pixel cleanup -> optional 1 px outline. The result is a NEW document with one pixel layer, and it becomes the current document. Max ${MAX_IMPORT_SIDE}x${MAX_IMPORT_SIDE}. ` +
       'Give width and height (or only one: the aspect ratio is kept) or scale (a divisor). Use `palette` (a palette id/name such as "endesga-32", or a list of hex colors) to force the colors; without it maxColors colors are derived from the image (median cut). ' +
-      'Then export_png with width/height to get an exact size, e.g. a 320x180 import exported at 1920x1080. Example: {"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}. ' +
+      'A 1920x1080 background can be imported directly; or import 320x180 and export_png with width/height 1920x1080. Example: {"path":"C:/art/bg.png","width":320,"height":180,"palette":"db32","dither":"ordered"}. ' +
       'Returns a sentence and a JSON object {documentId,name,width,height,colors,transparentPixels}.',
     input: obj({
-      path: z.string().min(1).describe('Absolute path of the image file (PNG; JPEG/WebP if supported).'),
+      path: z.string().min(1).describe('Absolute path of the image file (PNG; JPEG, WebP, GIF, BMP, AVIF in the app and headless mode).'),
       name: z.string().min(1).optional().describe('Document name. Default: the file name.'),
       width: z.number().int().min(1).max(MAX_IMPORT_SIDE).optional().describe('Output width in pixels.'),
       height: z.number().int().min(1).max(MAX_IMPORT_SIDE).optional().describe('Output height in pixels.'),
@@ -148,6 +144,7 @@ export const studioTools = [
   defineTool({
     name: 'export_many',
     group: 'export',
+    document: false,
     readOnly: true,
     description:
       'Export several PNGs in one call. Each item: {document?, path, width?, height?, scale?, frame?}: the document (default current), the output path (absolute, or a file name for ~/PixelStudio/exports), an exact size (width and height, nearest neighbour, any ratio) or an integer scale, and the frame (default active). Returns the written paths as text and as JSON {paths}. Example: {"items":[{"document":"doc2","path":"C:/out/bg.png","width":1920,"height":1080}]}.',
@@ -155,7 +152,7 @@ export const studioTools = [
       items: z
         .array(
           obj({
-            document: z.string().optional().describe('documentId (see list_documents). Default: the current document.'),
+            document: z.string().optional().describe(DOCUMENT_DESC),
             path: z.string().min(1).describe('Output path.'),
             width: z.number().int().min(1).optional().describe('Exact output width in pixels.'),
             height: z.number().int().min(1).optional().describe('Exact output height in pixels.'),
@@ -184,15 +181,19 @@ export const studioTools = [
   defineTool({
     name: 'draw_sprite_from_reference',
     group: 'documents',
+    document: false,
     readOnly: true,
     description:
-      'Prepare a small sprite (up to 128x128, typically 64x96) that YOU then draw from a reference image: creates a new document of that size with the given palette, adds the reference downscaled to fit as a dimmed, locked REFERENCE layer (never exported), and returns drawing guidance. Draw on the "Sprite" layer with draw_grid (max 64x64 per call), look with render_preview, then export_png. The new document becomes current. Returns text plus JSON {documentId,name,width,height,palette,referenceLayerId}.',
+      'Prepare a small sprite (up to 128x128, typically 64x96) that YOU then draw from a reference image: creates a new document of that size with the given palette, adds the reference downscaled to fit as a dimmed, locked REFERENCE layer (never exported), and returns drawing guidance. Draw on the "Sprite" layer with draw_grid (max 64x64 per call), look with render_preview, then export_png. The new document becomes current. With `expressions` (e.g. ["neutral","happy"]) it is also an expression set: one tagged frame per expression (see make_expression_set). Returns text plus JSON {documentId,name,width,height,palette,referenceLayerId} (and expressions:[{name,frame,frameId,tagId}] when given).',
     input: obj({
       reference: z.string().min(1).describe('Absolute path of the reference image.'),
       width: z.number().int().min(1).max(128).describe('Sprite width in pixels (max 128).'),
       height: z.number().int().min(1).max(128).describe('Sprite height in pixels (max 128).'),
       palette: z.union([z.string(), z.array(z.string()).min(1)]).describe('Palette id/name (see list_palettes) or hex colors. Use only these colors.'),
       expression: z.string().optional().describe('Facial expression or pose to draw, e.g. "smiling", "worried", "surprised".'),
+      expressions: expressionNames
+        .optional()
+        .describe('Make an expression set: one frame per name (lowercase letters and digits), e.g. ["neutral","happy","sad"]. Frames are addressable by name, see make_expression_set.'),
       name: z.string().min(1).optional().describe('Document name. Default: the reference file name.')
     }),
     handler: async (args, ctx) => {
@@ -210,6 +211,8 @@ export const studioTools = [
       const data = new Uint32Array(rw * rh)
       for (let i = 0; i < data.length; i++) data[i] = small.data[i]!
       doc.cels.set(celKey(ref.id, doc.frames[0]!.id), { x: Math.floor((args.width - rw) / 2), y: Math.floor((args.height - rh) / 2), w: rw, h: rh, data })
+      // applied before the document is opened, so the set is part of its initial state (not an undo step)
+      const set = args.expressions ? applyExpressionSet(doc, { expressions: args.expressions, exec: (cmd) => cmd.apply(doc) }) : undefined
       const documentId = addDocument(ctx, doc)
       const hexes = palette.colors.map((c) => c.hex)
       const expression = args.expression?.trim()
@@ -218,15 +221,100 @@ export const studioTools = [
         `The reference (${src.width}x${src.height}) is on the locked, dimmed layer "Reference" (id ${ref.id}) at ${rw}x${rh}; it is NOT exported. Draw on the layer "Sprite" (id ${sprite.id}, the active layer).`,
         'How to draw: call render_preview to see the reference, read the silhouette, then paint with draw_grid (rows of characters + a legend of palette colors; max 64x64 per call, use x/y for the rest). Block in the silhouette in one color first, then base colors, shading, highlights, and finally a 1 px outline (the outline tool can do it). Use only the palette colors, hue-shifted shadows (cooler) and highlights (warmer). Keep it clean: no stray single pixels.',
         expression ? `Expression: ${expression}. Keep the body and outfit of the reference and change only what shows the expression (eyes, brows, mouth, head tilt). Redraw the face at the pixel level instead of blurring it.` : 'Expression: copy the one in the reference.',
-        'When done: render_preview to compare with the reference, fix differences, then export_png (width/height for an exact size).'
+        ...(set ? [expressionGuidance(set, undefined, { undrawn: true })] : []),
+        set
+          ? 'When done: render_preview to compare with the reference, then export_expression_set (one PNG per expression).'
+          : 'When done: render_preview to compare with the reference, fix differences, then export_png (width/height for an exact size).'
       ].join('\n')
-      return withJson(guide, { documentId, name, width: args.width, height: args.height, palette: hexes, referenceLayerId: ref.id })
+      return withJson(guide, {
+        documentId,
+        name,
+        width: args.width,
+        height: args.height,
+        palette: hexes,
+        referenceLayerId: ref.id,
+        ...(set ? { expressions: set.map(({ name: n, frame, frameId, tagId }) => ({ name: n, frame, frameId, tagId })) } : {})
+      })
+    }
+  }),
+
+  defineTool({
+    name: 'make_expression_set',
+    group: 'documents',
+    description:
+      'Turn the document into an expression set for a visual-novel character: one frame per expression, each frame tagged with the expression name, so {"frame":"happy"} addresses it in every tool (draw_grid, render_preview, export_png, set_active). ' +
+      'Draw the finished base pose first (the whole figure, neutral face). The base frame (default: the active frame) becomes the first expression; every other expression is a copy of it, all layers included, so the body stays identical and you only redraw the face. ' +
+      'Expression names are lowercase letters and digits; VN Studio defaults: neutral, happy, sad, angry, surprised, worried, scared, thinking. Call it again with more names to add expressions (existing ones are kept). `face` is optional: the rectangle where the face is, repeated in the guidance. One undo step. ' +
+      'Then redraw each face, and export_expression_set. Example: {"expressions":["neutral","happy","sad"],"face":{"x":8,"y":4,"w":12,"h":10}}. Returns guidance text plus JSON {documentId,expressions:[{name,frame,frameId,tagId}],face}.',
+    input: obj({
+      expressions: expressionNames.describe('Expression names, 1-24, lowercase letters and digits, e.g. ["neutral","happy","sad"]. The first one is the base frame.'),
+      base: frameRef(`${FRAME_REF_DESC} The finished base pose. Default: the active frame.`).optional(),
+      face: faceRegion.optional().describe('Where the face is on the canvas: {x,y,w,h}. Only used for the guidance.')
+    }),
+    handler: ({ expressions, base, face }, { session }) => {
+      const doc = session.doc
+      if (face && (face.x < 0 || face.y < 0 || face.x + face.w > doc.width || face.y + face.h > doc.height)) {
+        throw new Error(`face ${fmtRect(face)} does not fit the canvas ${doc.width}x${doc.height}.`)
+      }
+      const baseFrame = resolveFrame(session, base)
+      const entries = applyExpressionSet(doc, { expressions, base: baseFrame.id, exec: (cmd) => session.execute(cmd) })
+      const all = expressionTags(doc).length
+      const created = entries.filter((e) => e.created).length
+      const text = `${created ? `Added ${plural(created, 'expression')}` : 'No new expressions'} (${plural(all, 'expression')} in the document, ${plural(doc.frames.length, 'frame')}).\n${expressionGuidance(entries, face)}`
+      return withJson(text, {
+        documentId: session.doc.id,
+        expressions: entries.map(({ name, frame, frameId, tagId }) => ({ name, frame, frameId, tagId })),
+        face: face ?? null
+      })
+    }
+  }),
+
+  defineTool({
+    name: 'export_expression_set',
+    group: 'export',
+    readOnly: true,
+    description:
+      'Export every expression of the document as its own PNG: <dir>/<prefix>_<expression>.png, all at the same size (nearest neighbour; width/height exact or integer scale, like export_png). Expressions are the one-frame tags made by make_expression_set (or only the listed `expressions`). Hidden and reference layers are not exported, so the sprites are transparent. ' +
+      'dir is an absolute folder (a relative one goes below ~/PixelStudio/exports); prefix defaults to the document name. Example: {"dir":"C:/vn/books/b1/characters/mara","prefix":"mara","height":384}. Returns text plus JSON {files:[{expression,path}],width,height}.',
+    input: obj({
+      dir: z.string().min(1).describe('Output folder (absolute, or relative to ~/PixelStudio/exports).'),
+      prefix: z.string().min(1).optional().describe('File name prefix: files are <prefix>_<expression>.png. Default: the document name.'),
+      expressions: expressionNames.optional().describe('Only these expressions. Default: all expressions of the document.'),
+      scale: z.number().int().min(1).max(32).optional().describe('Integer upscale factor (default 1). Ignored when width and height are given.'),
+      width: z.number().int().min(1).max(8192).optional().describe('Exact output width in pixels (nearest neighbour).'),
+      height: z.number().int().min(1).max(8192).optional().describe('Exact output height in pixels. With only one of width/height the aspect ratio is kept.')
+    }),
+    handler: async (args, { session, services }) => {
+      const doc = session.doc
+      const tags = args.expressions
+        ? [...new Set(args.expressions)].map((n) => {
+            const t = requireTag(doc, n)
+            if (t.from !== t.to) throw new Error(`Tag "${n}" covers ${plural(t.to - t.from + 1, 'frame')}, it is not an expression. Expressions are one-frame tags (see make_expression_set).`)
+            return t
+          })
+        : expressionTags(doc)
+      if (tags.length === 0) throw new Error('This document has no expressions. Call make_expression_set first.')
+      const dir = args.dir.replace(/[\\/]+$/, '')
+      const prefix = safeFileName(args.prefix ?? doc.name)
+      const files: Array<{ expression: string; path: string }> = []
+      let size = { width: doc.width, height: doc.height }
+      for (const t of tags) {
+        const r = await writeDocumentPng(session, services, `${dir}/${prefix}_${t.name}.png`, { width: args.width, height: args.height, scale: args.scale, frame: doc.frames[t.from]!.id })
+        files.push({ expression: t.name, path: r.path })
+        size = r
+      }
+      return withJson(`Exported ${plural(files.length, 'expression')} as PNG (${size.width}x${size.height} px each):\n${files.map((f) => `${f.expression}: ${f.path}`).join('\n')}`, {
+        files,
+        width: size.width,
+        height: size.height
+      })
     }
   }),
 
   defineTool({
     name: 'list_documents',
     group: 'documents',
+    document: false,
     readOnly: true,
     description: 'List the open documents: documentId, name, size, the project path (null until saved), whether it is the current one and whether it has unsaved changes. Returns text and JSON {documents}.',
     input: obj({}),
@@ -240,8 +328,42 @@ export const studioTools = [
   }),
 
   defineTool({
+    name: 'select_document',
+    group: 'documents',
+    readOnly: true,
+    description: 'Make a document the current one (the default target of every tool call without `document`; in the window app its tab comes to the front). Returns text and JSON {documentId,name,width,height}.',
+    input: obj({ document: z.string().min(1).describe('documentId (see list_documents).') }),
+    handler: (args, ctx) => {
+      const documentId = ctx.documentId ?? args.document
+      ctx.documents?.activate(documentId)
+      const d = ctx.session.doc
+      return withJson(`Document ${documentId} ("${d.name}" ${describeSize(d)}) is now the current document.`, { documentId, name: d.name, width: d.width, height: d.height })
+    }
+  }),
+
+  defineTool({
+    name: 'close_document',
+    group: 'documents',
+    readOnly: true,
+    description:
+      'Close a document. A document with unsaved changes is refused unless force=true: save_document it first to keep it. If it was the current one, the most recently added remaining document becomes current; closing the last one leaves a blank 32x32 document. Returns text and JSON {documentId,closed,current} (current = the documentId that is current now).',
+    input: obj({
+      document: z.string().min(1).describe('documentId (see list_documents).'),
+      force: z.boolean().optional().describe('Close even with unsaved changes (they are lost). Default false.')
+    }),
+    handler: (args, ctx) => {
+      if (!ctx.documents) throw new Error('This host has a single document, it cannot be closed.')
+      const documentId = ctx.documentId ?? args.document
+      ctx.documents.close(documentId, { force: args.force })
+      const current = ctx.documents.list().find((d) => d.current)?.documentId ?? null
+      return withJson(`Closed document ${documentId}. Current document: ${current ?? 'none'}.`, { documentId, closed: true, current })
+    }
+  }),
+
+  defineTool({
     name: 'open_document',
     group: 'documents',
+    document: false,
     readOnly: true,
     description:
       'Open a Pixel Studio project (.pxs) or an image (PNG; a PNG opens as a new one-layer document at its pixel size) and make it the current document. With exportTo, the app writes a PNG there (optionally scaled to exportWidth x exportHeight, nearest neighbour) every time the document is saved (save_document, Ctrl+S): that is how an edit in the editor flows back to VN Studio. In the window app the document shows in a new tab. Returns text and JSON {documentId,name,width,height,path}.',
@@ -249,7 +371,10 @@ export const studioTools = [
       path: z.string().min(1).describe('Absolute path of a .pxs project or a PNG.'),
       exportTo: z.string().min(1).optional().describe('Absolute path of the PNG to write on every save.'),
       exportWidth: z.number().int().min(1).optional().describe('Exact export width (use with exportHeight).'),
-      exportHeight: z.number().int().min(1).optional().describe('Exact export height (use with exportWidth).')
+      exportHeight: z.number().int().min(1).optional().describe('Exact export height (use with exportWidth).'),
+      handover: obj({ path: z.string().optional(), dirty: z.boolean().optional() })
+        .optional()
+        .describe('Internal, not for agents: the window opening a document the headless engine handed over. `path` = the project path to remember (omit = never saved), `dirty` = keep it unsaved. Only for a .pxs.')
     }),
     handler: async (args, ctx) => {
       const exportTo: ExportTarget | undefined = args.exportTo ? { path: args.exportTo, width: args.exportWidth, height: args.exportHeight } : undefined
@@ -267,6 +392,10 @@ export const studioTools = [
         const cel = rasterToCel(r)
         if (cel) doc.cels.set(celKey(doc.layers[0]!.id, doc.frames[0]!.id), cel)
         documentId = addDocument(ctx, doc, { path: null, exportTo })
+      } else if (args.handover) {
+        const doc = deserializeProject(new TextDecoder().decode(await ctx.services.readFile(args.path)))
+        nativePath = args.handover.path ?? null
+        documentId = addDocument(ctx, doc, { path: nativePath, exportTo, dirty: args.handover.dirty })
       } else {
         const full = await ctx.services.resolveProjectPath(withExtension(args.path, 'pxs'))
         nativePath = full
@@ -295,7 +424,7 @@ export const studioTools = [
     description:
       'Save a document as a Pixel Studio project (.pxs). Defaults: the current document, and the path it was opened from or last saved to (else ~/PixelStudio/projects/<name>.pxs). When the document was opened with exportTo, the PNG is exported there too. Returns text and JSON {documentId,path,exported?}.',
     input: obj({
-      document: z.string().optional().describe('documentId (see list_documents). Default: the current document.'),
+      document: z.string().optional().describe(DOCUMENT_DESC),
       path: z.string().min(1).optional().describe('Absolute path or file name (".pxs" is added if missing).')
     }),
     handler: async (args, ctx) => {

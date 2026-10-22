@@ -3,6 +3,9 @@ export const CORE_VERSION = 1
 
 export * from './model'
 export * from './raster'
+export * from './fill'
+export * from './font'
+export * from './ui'
 export * from './commands'
 export * from './palettes'
 export * from './codecs/gridText'

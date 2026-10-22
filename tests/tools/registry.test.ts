@@ -7,20 +7,20 @@ const EXPECTED = [
   'get_document', 'new_document', 'resize_canvas', 'set_active', 'open_project', 'save_project',
   'add_layer', 'update_layer', 'delete_layer', 'move_layer', 'duplicate_layer', 'merge_down',
   'add_frame', 'duplicate_frame', 'delete_frame', 'move_frame', 'set_frame_duration', 'create_tag', 'update_tag', 'delete_tag', 'copy_cel',
-  'draw_grid', 'set_pixels', 'draw_line', 'draw_rect', 'draw_ellipse', 'flood_fill', 'replace_color', 'clear_cel', 'transform_cel', 'outline',
+  'draw_grid', 'set_pixels', 'draw_line', 'draw_polygon', 'draw_gradient', 'draw_image', 'draw_text', 'measure_text', 'draw_ui_element', 'draw_nine_slice', 'draw_rect', 'draw_ellipse', 'flood_fill', 'replace_color', 'clear_cel', 'transform_cel', 'outline',
   'read_grid', 'render_preview',
   'get_palette', 'set_palette', 'add_colors', 'remove_colors', 'list_palettes', 'load_palette', 'import_palette', 'export_palette', 'remap_to_palette', 'save_palette',
   'list_assets', 'get_asset', 'save_as_asset', 'place_asset', 'set_style_reference', 'get_style_context',
   'export_png', 'export_spritesheet', 'export_gif',
-  'import_image', 'export_many', 'draw_sprite_from_reference', 'list_documents', 'open_document', 'save_document',
+  'import_image', 'export_many', 'draw_sprite_from_reference', 'list_documents', 'open_document', 'save_document', 'select_document', 'close_document', 'make_expression_set', 'export_expression_set',
   'undo', 'redo'
 ]
 
 describe('createDefaultRegistry', () => {
   const registry = createDefaultRegistry()
 
-  it('contains all 60 tools', () => {
-    expect(registry.list()).toHaveLength(60)
+  it('contains all 71 tools', () => {
+    expect(registry.list()).toHaveLength(71)
     expect(registry.list().map((t) => t.name).sort()).toEqual([...EXPECTED].sort())
   })
 
@@ -99,7 +99,7 @@ describe('createToolHost', () => {
   it('lists defs, serializes calls and groups turns', async () => {
     const t = setup()
     const host = createToolHost(t.registry, () => ({ session: t.session, services: t.services }))
-    expect(host.tools()).toHaveLength(60)
+    expect(host.tools()).toHaveLength(71)
     const sig = new AbortController().signal
     const d0 = t.session.history.undoDepth
     host.beginTurn('Test turn')

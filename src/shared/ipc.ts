@@ -30,7 +30,9 @@ export const IPC = {
   fsResolveProjectPath: 'fs:resolveProjectPath',
   palettesList: 'palettes:list',
   palettesSave: 'palettes:save',
-  palettesLoad: 'palettes:load'
+  palettesLoad: 'palettes:load',
+  // main -> renderer (webContents.send): a line for the status bar
+  appNotice: 'app:notice'
 } as const
 
 /** main -> renderer: run a tool on the live document. */
