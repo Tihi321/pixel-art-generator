@@ -280,6 +280,44 @@ describe('agent loop, JSON-action fallback', () => {
     expect(res.messages.some((m) => m.role === 'tool')).toBe(false)
   })
 
+  it('answers a first reply that refuses to use tools with one nudge, then runs the tools; repeated refusals end the run after two nudges', async () => {
+    const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    mock.script([
+      reply({ say: 'I can\u2019t use tools in this text-only request.', actions: [], done: true }),
+      reply({ say: 'Drawing', actions: [{ tool: 'draw', args: { n: 1 } }], done: false }),
+      reply({ say: 'Done', actions: [], done: true })
+    ])
+    const { host, calls } = makeHost()
+    const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host })
+    expect(res.reason).toBe('completed')
+    expect(calls).toEqual([{ name: 'draw', args: { n: 1 } }])
+    expect(text(mock.requests[1]!.messages.at(-1)!)).toMatch(/plain-text JSON protocol/)
+    // refusing again and again: two nudges at most, then the run ends
+    const again = new MockProvider('mock', { chunkDelayMs: 1 })
+    again.script([reply({ say: "I can't use tools.", actions: [], done: true })])
+    const r2 = await runAgent({ chat: mockChat(again), ...json, system: 's', userMessage: 'go', host: makeHost().host })
+    expect(r2.reason).toBe('completed')
+    expect(again.requests).toHaveLength(3)
+    // a plain answer is not nudged
+    const plain = new MockProvider('mock', { chunkDelayMs: 1 })
+    plain.script([reply({ say: 'Hello!', actions: [], done: true })])
+    await runAgent({ chat: mockChat(plain), ...json, system: 's', userMessage: 'hi', host: makeHost().host })
+    expect(plain.requests).toHaveLength(1)
+  })
+
+  it('takes two repair retries for broken JSON before giving up', async () => {
+    const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    mock.script(['{"say": "a', '{"actions": [', reply({ say: 'ok', actions: [], done: true })])
+    const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host: makeHost().host })
+    expect(res.reason).toBe('completed')
+    expect(mock.requests).toHaveLength(3)
+    const bad = new MockProvider('mock', { chunkDelayMs: 1 })
+    bad.script(['nope'])
+    const r2 = await runAgent({ chat: mockChat(bad), ...json, system: 's', userMessage: 'go', host: makeHost().host })
+    expect(r2.reason).toBe('error')
+    expect(r2.error?.message).toMatch(/after two repair attempts/)
+  })
+
   it('done: true with actions runs them and stops; an unknown tool is an error result; errors are reported to the model', async () => {
     const mock = new MockProvider('mock', { chunkDelayMs: 1 })
     mock.script([

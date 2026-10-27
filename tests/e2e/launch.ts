@@ -2,7 +2,7 @@
 // user-data dir and a free MCP port, so a test run never touches ~/PixelStudio or collides with a running app.
 
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -30,10 +30,12 @@ export interface LaunchedApp {
   close: () => Promise<void>
 }
 
-export async function launchApp(): Promise<LaunchedApp> {
+/** seedConfigFrom: a config folder copied into the isolated home first (a COPY of the real one, which is never written). */
+export async function launchApp(opts: { seedConfigFrom?: string } = {}): Promise<LaunchedApp> {
   const base = await mkdtemp(path.join(os.tmpdir(), 'pixel-studio-e2e-'))
   const home = path.join(base, 'PixelStudio')
   const userData = path.join(base, 'user-data')
+  if (opts.seedConfigFrom) await cp(opts.seedConfigFrom, path.join(home, 'config'), { recursive: true })
   const mcpPort = await freePort()
   const app = await electron.launch({
     args: [path.join(projectRoot, 'out/main/index.js'), `--user-data-dir=${userData}`],
