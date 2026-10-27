@@ -101,7 +101,13 @@ const REPEAT = Number(process.env.ACP_REPEAT ?? 1)
 
 async function drawHeartOnce(ref: string, n: number): Promise<string | null> {
   await page.getByTestId('chat-new').click()
-  await expect(modelSelect().locator(`option[value="${ref}"]`)).toHaveCount(1)
+  try {
+    await expect(modelSelect().locator(`option[value="${ref}"]`)).toHaveCount(1, { timeout: 15000 })
+  } catch (e) {
+    const opts = await modelSelect().locator('option').evaluateAll((os) => os.map((o) => (o as unknown as { value: string }).value))
+    console.log(`[acp-live] model option ${ref} missing; acp options: ${JSON.stringify(opts.filter((o) => o.startsWith('acp')))}; total ${opts.length}`)
+    throw e
+  }
   await modelSelect().selectOption(ref)
   await page.getByTestId('chat-input').fill('Make a new 16x16 document and draw a 16x16 red heart sprite on it. Use your tools, then tell me when it is finished.')
   const t0 = Date.now()
@@ -111,13 +117,15 @@ async function drawHeartOnce(ref: string, n: number): Promise<string | null> {
   await page.screenshot({ path: path.join(shots, `c-${ref.replace(/[^a-z0-9.]+/gi, '_')}-${n}.png`) })
   const errors = await page.getByTestId('chat-error').allTextContents()
   const cards = await page.getByTestId('tool-card').count()
-  const failedCards = await page.getByTestId('tool-card').evaluateAll((els) => els.filter((e) => e.classList.contains('error')).length)
+  const cardStates = await page.getByTestId('tool-card').evaluateAll((els) => els.map((e) => e.classList.contains('error')))
+  const failedCards = cardStates.filter(Boolean).length // failed calls the agent then corrected are fine; the LAST call must have worked
+  const lastFailed = cardStates.length > 0 && cardStates[cardStates.length - 1] === true
   const answer = (await page.getByTestId('chat-assistant').allTextContents()).join(' | ')
   const pixels = await filledPixels()
   console.log(`[acp-live] ${ref} #${n}: ${secs}s, ${cards} tool cards (${failedCards} failed), ${pixels} pixels, answer: ${answer.slice(0, 200)}`)
   if (errors.length) return `chat error: ${errors.join(' / ')}`
   if (cards === 0) return `no tool call, answer: ${answer.slice(0, 200)}`
-  if (failedCards > 0) return `${failedCards} tool call(s) failed`
+  if (lastFailed) return `the last tool call failed (${failedCards} failed in all)`
   if (pixels === 0) return 'canvas still empty'
   if ((await page.evaluate<number>('window.__pixelStudio.session.history.undoDepth')) === 0) return 'no undo step recorded'
   return null

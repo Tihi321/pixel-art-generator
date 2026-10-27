@@ -11,7 +11,7 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 
 - Live Playwright spec `tests/e2e/acp-live.spec.ts` (run with `ACP_LIVE=1`, proxy on 7461): Settings > Models lists `acp` with prefixed ids only, the Add provider form (Test, detect, remove) and agent chat runs on `acp/codex/gpt-5.6-luna` and `acp/antigravity/gemini-3.8-flash` that draw a heart. It runs on an isolated home seeded with a copy of the real config.
 - Fixes: providers.md edits are serialized (`LlmService`); JSON-action mode tells the model the actions are run by the app, nudges a first-step "I can't use tools" refusal twice, and repairs broken JSON twice.
-- Reliability on the proxy after the fixes (`ACP_REPEAT=3`): codex 3/3, gemini 2/3 (one draw_grid call failed and the model did not retry). Before: codex failed 3 of 5.
+- JSON-action mode also sends the model back (max 2) when it ends the turn while its last action failed. Reliability on the proxy (`ACP_REPEAT=3`): codex 3/3, gemini 3/3 (one codex run in an earlier batch 2/3). Before the fixes codex failed 3 of 5.
 
 ## PAR-14 ACP proxy and custom providers (2026-10-27, branch `PAR-14_acp-custom-providers`)
 

@@ -1,5 +1,12 @@
 # Changelog PAR-15
 
+## Follow-up 2: failed-last-action guard
+
+- `src/llm/agent.ts` JSON-action mode: `MAX_ERROR_NUDGES = 2`, `errorNudges`, `lastError` (null after a later success). When the model ends the turn (empty actions, or done: true) while its last action failed, it gets `Your last action failed and nothing after it succeeded:
+<error>...` instead of the turn ending. Unit-tested (fires, not after a later success, capped). Existing test adjusted (its last action no longer fails).
+- Spec: a failed call that the agent later corrected is fine, only a failing LAST call or an empty canvas fails; diagnostics when a model option is missing.
+- Live `ACP_REPEAT=3`: codex 3/3, gemini 3/3 (once codex 2/3: a corrected-then-empty canvas; twice the gemini option was missing from the chat list right after a failed codex test, cause not found).
+
 ## Follow-up (checker): tighter refusal regex, ACP_REPEAT
 
 - `NO_TOOLS_REFUSAL` now matches explicit refusals only (can't/cannot/unable to use|call|run tools, disallows tool, text-only, without using tools); unit test for matches and non-matches.

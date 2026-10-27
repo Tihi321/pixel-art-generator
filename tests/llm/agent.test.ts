@@ -305,6 +305,46 @@ describe('agent loop, JSON-action fallback', () => {
     expect(plain.requests).toHaveLength(1)
   })
 
+  it('after a failed LAST action the model gets one corrective message instead of ending the turn; not after a later success; capped at two', async () => {
+    const failing = { draw: () => ({ content: [{ type: 'text' as const, text: 'bad grid' }], isError: true }) }
+    // done: true right after a failing action -> corrected, then it fixes it
+    let calls = 0
+    const mk = (fails: number) => makeHost({ draw: () => (++calls <= fails ? { content: [{ type: 'text', text: 'bad grid' }], isError: true } : { content: [{ type: 'text', text: 'fine' }] }) })
+    const a = new MockProvider('mock', { chunkDelayMs: 1 })
+    a.script([
+      reply({ say: 'drawn', actions: [{ tool: 'draw', args: {} }], done: true }),
+      reply({ actions: [{ tool: 'draw', args: { n: 2 } }], done: true })
+    ])
+    const ra = await runAgent({ chat: mockChat(a), ...json, system: 's', userMessage: 'go', host: mk(1).host })
+    expect(ra.reason).toBe('completed')
+    expect(a.requests).toHaveLength(2)
+    expect(text(a.requests[1]!.messages.at(-1)!)).toContain('Your last action failed and nothing after it succeeded:\nbad grid')
+    // empty actions after a failure -> corrected as well
+    calls = 0
+    const b = new MockProvider('mock', { chunkDelayMs: 1 })
+    b.script([
+      reply({ actions: [{ tool: 'draw', args: {} }], done: false }),
+      reply({ say: 'all good', actions: [], done: true }),
+      reply({ actions: [{ tool: 'draw', args: {} }], done: false }),
+      reply({ actions: [], done: true })
+    ])
+    const rb = await runAgent({ chat: mockChat(b), ...json, system: 's', userMessage: 'go', host: mk(1).host })
+    expect(rb.reason).toBe('completed')
+    expect(text(b.requests[2]!.messages.at(-1)!)).toContain('Your last action failed and nothing after it succeeded:\nbad grid')
+    // a later success: no correction
+    calls = 0
+    const c = new MockProvider('mock', { chunkDelayMs: 1 })
+    c.script([reply({ actions: [{ tool: 'draw', args: {} }, { tool: 'draw', args: {} }], done: false }), reply({ say: 'done', actions: [], done: true })])
+    await runAgent({ chat: mockChat(c), ...json, system: 's', userMessage: 'go', host: mk(1).host })
+    expect(c.requests).toHaveLength(2)
+    // always failing: two corrections at most, then the turn ends
+    const d = new MockProvider('mock', { chunkDelayMs: 1 })
+    d.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+    const rd = await runAgent({ chat: mockChat(d), ...json, system: 's', userMessage: 'go', host: makeHost(failing).host })
+    expect(rd.reason).toBe('completed')
+    expect(d.requests).toHaveLength(3)
+  })
+
   it('NO_TOOLS_REFUSAL matches explicit refusals only', () => {
     for (const t of [
       "I can't use tools in this text-only request.",
@@ -344,7 +384,7 @@ describe('agent loop, JSON-action fallback', () => {
     const mock = new MockProvider('mock', { chunkDelayMs: 1 })
     mock.script([
       reply({ actions: [{ tool: 'bogus', args: {} }, { tool: 'draw', args: {} }], done: false }),
-      reply({ actions: [{ tool: 'draw', args: { n: 2 } }], done: true }),
+      reply({ actions: [{ tool: 'draw', args: { n: 3 } }], done: true }),
       reply({ actions: [], done: true })
     ])
     const { host, calls } = makeHost({ draw: (a) => ((a as { n?: number }).n === 2 ? { content: [{ type: 'text', text: 'bad' }], isError: true } : { content: [{ type: 'text', text: 'fine' }] }) })
@@ -353,7 +393,7 @@ describe('agent loop, JSON-action fallback', () => {
     expect(res.steps).toBe(2)
     expect(calls).toHaveLength(2)
     expect(text(mock.requests[1]!.messages.at(-1)!)).toMatch(/#1 bogus \(error\):\nUnknown tool "bogus"[^\n]*\n#2 draw:\nfine/)
-    expect(text(res.messages.at(-1)!)).toBe('Results of your actions:\n#1 draw (error):\nbad')
+    expect(text(res.messages.at(-1)!)).toBe('Results of your actions:\n#1 draw:\nfine')
   })
 
   it('repairs a reply that is not JSON, and takes JSON out of a code fence', async () => {
