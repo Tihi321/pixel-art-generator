@@ -15,7 +15,7 @@ const PROXY = 'http://127.0.0.1:7461/v1'
 let launched: LaunchedApp
 let page: Page
 
-test.describe.configure({ mode: 'serial' })
+test.describe.configure({ mode: 'default' })
 test.skip(!live, 'set ACP_LIVE=1 (needs the ACP proxy on 127.0.0.1:7461)')
 
 test.beforeAll(async () => {
@@ -65,6 +65,7 @@ test('a) Settings > Models lists the acp provider and its prefixed models, no un
     await expect(row.locator('input')).toBeChecked() // saved through IPC: the box follows
   }
   await page.screenshot({ path: path.join(shots, 'a-models.png') })
+  await closeSettings()
 })
 
 test('b) add a custom provider through the form, Test, detect models, remove it', async () => {
@@ -94,29 +95,43 @@ const filledPixels = (): Promise<number> =>
     '(() => { const s = window.__pixelStudio.session; let n = 0; for (const c of s.doc.cels.values()) for (const v of c.data) if ((v >>> 24) !== 0) n++; return n })()'
   )
 
+// Reliability: ACP_REPEAT=N runs each model N times (default 1), each in a new chat. Failures are collected with their cause and reported;
+// the test fails when any run failed, and the log says how many passed.
+const REPEAT = Number(process.env.ACP_REPEAT ?? 1)
+
+async function drawHeartOnce(ref: string, n: number): Promise<string | null> {
+  await page.getByTestId('chat-new').click()
+  await expect(modelSelect().locator(`option[value="${ref}"]`)).toHaveCount(1)
+  await modelSelect().selectOption(ref)
+  await page.getByTestId('chat-input').fill('Make a new 16x16 document and draw a 16x16 red heart sprite on it. Use your tools, then tell me when it is finished.')
+  const t0 = Date.now()
+  await page.getByTestId('chat-send').click()
+  await expect(page.getByTestId('chat-send')).toBeVisible({ timeout: 7 * 60_000 }) // Stop turns back into Send
+  const secs = Math.round((Date.now() - t0) / 1000)
+  await page.screenshot({ path: path.join(shots, `c-${ref.replace(/[^a-z0-9.]+/gi, '_')}-${n}.png`) })
+  const errors = await page.getByTestId('chat-error').allTextContents()
+  const cards = await page.getByTestId('tool-card').count()
+  const failedCards = await page.getByTestId('tool-card').evaluateAll((els) => els.filter((e) => e.classList.contains('error')).length)
+  const answer = (await page.getByTestId('chat-assistant').allTextContents()).join(' | ')
+  const pixels = await filledPixels()
+  console.log(`[acp-live] ${ref} #${n}: ${secs}s, ${cards} tool cards (${failedCards} failed), ${pixels} pixels, answer: ${answer.slice(0, 200)}`)
+  if (errors.length) return `chat error: ${errors.join(' / ')}`
+  if (cards === 0) return `no tool call, answer: ${answer.slice(0, 200)}`
+  if (failedCards > 0) return `${failedCards} tool call(s) failed`
+  if (pixels === 0) return 'canvas still empty'
+  if ((await page.evaluate<number>('window.__pixelStudio.session.history.undoDepth')) === 0) return 'no undo step recorded'
+  return null
+}
+
 for (const ref of ['acp/codex/gpt-5.6-luna', 'acp/antigravity/gemini-3.8-flash']) {
   test(`c) the agent chat draws a heart with ${ref}`, async () => {
-    test.setTimeout(8 * 60_000)
-    await page.getByTestId('chat-new').click()
-    await expect(modelSelect().locator(`option[value="${ref}"]`)).toHaveCount(1)
-    await modelSelect().selectOption(ref)
-    const before = await filledPixels()
-    await page.getByTestId('chat-input').fill('Make a new 16x16 document and draw a 16x16 red heart sprite on it. Use your tools, then say done.')
-    await page.getByTestId('chat-send').click()
-    await expect(page.getByTestId('chat-send')).toBeVisible({ timeout: 7 * 60_000 }) // Stop turns back into Send
-    const tag = ref.replace(/[^a-z0-9.]+/gi, '_')
-    await page.screenshot({ path: path.join(shots, `c-${tag}.png`) })
-    const errors = await page.getByTestId('chat-error').allTextContents()
-    const cards = await page.getByTestId('tool-card').count()
-    const answer = (await page.getByTestId('chat-assistant').allTextContents()).join(' | ')
-    console.log(`[acp-live] ${ref}: ${cards} tool cards, answer: ${answer.slice(0, 300)}`)
-    const dump = await page.getByTestId('tool-card').evaluateAll((els) => els.map((e) => `${e.className}: ${(e.textContent ?? '').slice(0, 400)}`))
-    console.log(`[acp-live] cards: ${JSON.stringify(dump)}`)
-    expect(errors, `chat errors: ${errors.join(' / ')}`).toEqual([])
-    expect(cards).toBeGreaterThan(0)
-    expect(await page.getByTestId('tool-card').evaluateAll((els) => els.filter((e) => e.classList.contains('error')).length)).toBe(0)
-    const after = await filledPixels()
-    expect(after, `pixels before ${before}, after ${after}`).toBeGreaterThan(0)
-    expect(await page.evaluate<number>('window.__pixelStudio.session.history.undoDepth')).toBeGreaterThan(0)
+    test.setTimeout(Math.max(1, REPEAT) * 8 * 60_000)
+    const failures: string[] = []
+    for (let n = 1; n <= REPEAT; n++) {
+      const why = await drawHeartOnce(ref, n)
+      if (why) failures.push(`#${n}: ${why}`)
+    }
+    console.log(`[acp-live] ${ref}: ${REPEAT - failures.length}/${REPEAT} passed${failures.length ? `; ${failures.join('; ')}` : ''}`)
+    expect(failures, `${ref}: ${REPEAT - failures.length}/${REPEAT} passed`).toEqual([])
   })
 }

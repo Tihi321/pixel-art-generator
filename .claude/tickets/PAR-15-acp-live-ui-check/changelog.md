@@ -1,5 +1,11 @@
 # Changelog PAR-15
 
+## Follow-up (checker): tighter refusal regex, ACP_REPEAT
+
+- `NO_TOOLS_REFUSAL` now matches explicit refusals only (can't/cannot/unable to use|call|run tools, disallows tool, text-only, without using tools); unit test for matches and non-matches.
+- Spec: `ACP_REPEAT=N` per model, failures collected with causes; settings closed after step a; tests no longer serial so a codex failure does not skip gemini; prompt ends "tell me when it is finished" (the model once took "say done" literally).
+- Live `ACP_REPEAT=3`: codex 3/3 (10-20 s), gemini 2/3 (57-94 s; run 3: a draw_grid call failed, model claimed success). Earlier unrecorded try with the old prompt: codex 1/3 (one literal "done", one failed tool).
+
 ## 2026-10-27 PAR-15: ACP live UI check and fixes
 
 Branch `PAR-15_acp-live-ui-check` (from master). Implemented directly by the orchestrator (no implementer child). Committed locally, not pushed.

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { runAgent, toolResultContent } from '../../src/llm/agent'
+import { NO_TOOLS_REFUSAL, runAgent, toolResultContent } from '../../src/llm/agent'
 import type { AgentEvent, ToolHost, ToolResult } from '../../src/llm/agent'
 import { MockProvider } from '../../src/llm/mock'
 import type { MockReply } from '../../src/llm/mock'
@@ -303,6 +303,28 @@ describe('agent loop, JSON-action fallback', () => {
     plain.script([reply({ say: 'Hello!', actions: [], done: true })])
     await runAgent({ chat: mockChat(plain), ...json, system: 's', userMessage: 'hi', host: makeHost().host })
     expect(plain.requests).toHaveLength(1)
+  })
+
+  it('NO_TOOLS_REFUSAL matches explicit refusals only', () => {
+    for (const t of [
+      "I can't use tools in this text-only request.",
+      'I can\u2019t use tools in this request.',
+      "I can't modify the document without using tools.",
+      'This request disallows tool calls.',
+      'I am unable to call tools here.',
+      'I cannot run any tools.',
+      'This is a text-only request.'
+    ])
+      expect(NO_TOOLS_REFUSAL.test(t), t).toBe(true)
+    for (const t of [
+      'No tool needed: the answer is 42.',
+      'There is no tool for that, so here is a description.',
+      'I can use tools to draw it.',
+      'Drawing the heart with the tools now.',
+      'Nothing to do, the sprite is finished.',
+      ''
+    ])
+      expect(NO_TOOLS_REFUSAL.test(t), t).toBe(false)
   })
 
   it('takes two repair retries for broken JSON before giving up', async () => {

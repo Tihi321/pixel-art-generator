@@ -87,7 +87,7 @@ export const actionSchema = z.object({
 type ActionReply = z.output<typeof actionSchema>
 
 /** A model that answers the first JSON reply with "I can't use tools / text-only" (some proxied coding agents do, now and then) instead of calling one. */
-export const NO_TOOLS_REFUSAL = /text-only|(?:can(?:no|'|’)t|unable to|not able to|don(?:'|’)t have|no|disallow\w*|without(?: using)?)\s+(?:\w+\s+){0,3}tool/i
+export const NO_TOOLS_REFUSAL = /text-only|(?:can(?:'|’)?t|cannot|unable to|not able to|won(?:'|’)?t be able to)\s+(?:\w+\s+){0,4}(?:use|call|run|invoke)\s+(?:\w+\s+)?tools?|(?:disallow|forbid|prohibit)\w*\s+(?:\w+\s+)?tool|without\s+(?:using\s+)?tools?|tool calls? (?:are|is) (?:not allowed|disabled|unavailable)/i
 
 /** Describes the tools and the reply format for models without native tool calling. */
 export function jsonModeInstructions(tools: ToolDef[]): string {
