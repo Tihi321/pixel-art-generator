@@ -128,6 +128,61 @@ describe('LlmService', () => {
     expect(o.error).toBeTruthy()
     expect(o.providers.length).toBeGreaterThan(0)
   })
+
+  it('adds, edits and removes a custom provider without a restart, keeping its key out of providers.md', async () => {
+    const { ops, store } = fakeKeys()
+    const calls: { url: string; auth: string | null }[] = []
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), auth: new Headers(init?.headers).get('authorization') })
+      return String(url).endsWith('/v1/models') ? new Response(JSON.stringify({ data: [{ id: 'a/one' }, { id: 'a/two' }] })) : new Response('', { status: 404 })
+    }) as unknown as typeof fetch
+    const svc = new LlmService({ seedDir, configDir: path.join(dir, 'config'), dataDir: dir, keys: ops, fetchImpl })
+    expect((await svc.overview()).providers.find((p) => p.id === 'acp')).toMatchObject({ name: 'ACP proxy', custom: false, enabled: false, canList: true, concurrency: 2, jsonSchema: false })
+
+    // reserved ids and a seed provider are refused, and nothing is written
+    const providersFile = path.join(dir, 'config', 'providers.md')
+    const before = await readFile(providersFile, 'utf8')
+    await expect(svc.saveCustomProvider({ name: 'ACP', baseUrl: 'http://127.0.0.1:1/v1', free: true, jsonSchema: false, concurrency: 1, enabled: true })).rejects.toThrow(/built-in/)
+    await expect(svc.saveCustomProvider({ id: 'deepseek', name: 'x', baseUrl: 'http://127.0.0.1:1/v1', free: true, jsonSchema: false, concurrency: 1, enabled: true })).rejects.toThrow(/not a custom/)
+    await expect(svc.removeCustomProvider('lmstudio')).rejects.toThrow(/not a custom/)
+    expect(await readFile(providersFile, 'utf8')).toBe(before)
+
+    // test before saving
+    expect(await svc.testCustomProvider({ baseUrl: 'http://127.0.0.1:9000/v1', apiKey: 'tk' })).toEqual({ ok: true, models: 2 })
+    expect(calls.at(-1)).toEqual({ url: 'http://127.0.0.1:9000/v1/models', auth: 'Bearer tk' })
+    expect(await svc.testCustomProvider({ baseUrl: 'ftp://x' })).toMatchObject({ ok: false })
+    expect(await svc.testCustomProvider({ baseUrl: 'http://127.0.0.1:9000/nope' })).toMatchObject({ ok: false, error: expect.stringContaining('404') })
+
+    // add: live at once, with its models discovered
+    const added = await svc.saveCustomProvider({ name: 'Home Proxy', baseUrl: 'http://127.0.0.1:9000/v1', apiKey: ' secret-key ', free: true, jsonSchema: false, concurrency: 3, enabled: true })
+    const home = added.providers.find((p) => p.id === 'home-proxy')!
+    expect(home).toMatchObject({ name: 'Home Proxy', custom: true, available: true, concurrency: 3, apiKeyEnv: 'CUSTOM_HOME_PROXY_API_KEY', keyStatus: 'stored', models: ['home-proxy/a/one', 'home-proxy/a/two'] })
+    expect(store.get('CUSTOM_HOME_PROXY_API_KEY')).toBe('secret-key')
+    expect(await readFile(providersFile, 'utf8')).not.toContain('secret-key')
+    expect(JSON.stringify(added)).not.toContain('secret-key')
+    await expect(svc.saveCustomProvider({ name: 'home proxy', baseUrl: 'http://127.0.0.1:9000/v1', free: true, jsonSchema: false, concurrency: 1, enabled: true })).rejects.toThrow(/exists already/)
+
+    // tick one of its models and select it, then edit: the key stays when the field is empty
+    await svc.showModels(['home-proxy/a/one'], true)
+    await svc.setSelectedModel('home-proxy/a/one')
+    const edited = await svc.saveCustomProvider({ id: 'home-proxy', name: 'Home Proxy', baseUrl: 'http://127.0.0.1:9100/v1', free: true, jsonSchema: true, concurrency: 'auto', enabled: true })
+    expect(edited.providers.find((p) => p.id === 'home-proxy')).toMatchObject({ baseUrl: 'http://127.0.0.1:9100/v1', jsonSchema: true, concurrencyAuto: true, keyStatus: 'stored' })
+    expect(store.get('CUSTOM_HOME_PROXY_API_KEY')).toBe('secret-key')
+    expect(await svc.testCustomProvider({ id: 'home-proxy', baseUrl: 'http://127.0.0.1:9000/v1' })).toEqual({ ok: true, models: 2 })
+    expect(calls.at(-1)!.auth).toBe('Bearer secret-key')
+
+    // a restart reads the same file
+    expect((await make(ops).overview()).providers.some((p) => p.id === 'home-proxy' && p.custom)).toBe(true)
+
+    // remove: entry, key, ticked model and selection are gone
+    const removed = await svc.removeCustomProvider('home-proxy')
+    expect(removed.providers.some((p) => p.id === 'home-proxy')).toBe(false)
+    expect(removed.selectedModel).toBeNull()
+    expect(removed.models.some((m) => m.provider === 'home-proxy')).toBe(false)
+    expect(store.has('CUSTOM_HOME_PROXY_API_KEY')).toBe(false)
+    expect(await readFile(providersFile, 'utf8')).not.toContain('home-proxy')
+    expect(await readFile(path.join(dir, 'config', 'models.md'), 'utf8')).not.toContain('home-proxy')
+  })
 })
 
 describe('appSettings', () => {

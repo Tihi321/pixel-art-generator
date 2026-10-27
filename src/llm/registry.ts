@@ -19,6 +19,10 @@ export { computeCost } from './pricing'
 export interface ProviderInfo {
   id: string
   kind: ProviderEntry['kind']
+  /** Label for the UI. */
+  name: string
+  /** Added in the Add provider form. */
+  custom: boolean
   enabled: boolean
   local: boolean
   baseUrl?: string
@@ -168,6 +172,8 @@ export class ModelRegistry {
       const info: ProviderInfo = {
         id: p.id,
         kind: p.kind,
+        name: p.name?.trim() || p.id,
+        custom: p.custom,
         enabled: p.enabled,
         local: p.local,
         baseUrl: p.base_url,
@@ -394,6 +400,12 @@ export class ModelRegistry {
    * Every chat model an openai-compat provider lists (`GET /models`), whether it is in the dropdown or not, for Settings > Models.
    * Text-only, no embedding models, no `discover_skip` ones. The list is kept, so picking one later knows its price and context.
    */
+  /** `GET /models` of an address that is not (yet) a provider, for the Add provider form's Test button. Returns the number of models. */
+  async testEndpoint(baseUrl: string, apiKey?: string, signal?: AbortSignal): Promise<number> {
+    const client = new OpenAiCompatClient({ id: 'test', baseUrl, apiKey, fetchImpl: this.opts.fetchImpl })
+    return (await client.listModelInfo(signal)).length
+  }
+
   async catalog(providerId: string, signal?: AbortSignal): Promise<ListedModel[]> {
     const p = this.providers.get(providerId)
     if (!p) throw new Error(`no provider "${providerId}"`)
