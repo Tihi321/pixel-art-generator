@@ -43,7 +43,13 @@ export const LLM_IPC = {
   /** (refs: string[], shown: boolean) => LlmOverview. Ticks / unticks models of the chat dropdown (config/models.md). A refused tick sets `error`. */
   showModels: 'llm:showModels',
   /** (cmd: LlmAddModel) => LlmOverview. Adds a model by id to config/models.md; rejects when a non-local provider's prices are missing. */
-  addModel: 'llm:addModel'
+  addModel: 'llm:addModel',
+  /** (form: LlmCustomProviderForm) => LlmOverview. Adds or edits an OpenAI-compatible provider in providers.md (custom: true) and reloads. */
+  saveCustomProvider: 'llm:saveCustomProvider',
+  /** (providerId: string) => LlmOverview. Removes a custom provider, its stored key and its ticked models. */
+  removeCustomProvider: 'llm:removeCustomProvider',
+  /** (cmd: LlmCustomProviderTest) => LlmCustomProviderTestResult. GET /models on an address before it is saved. */
+  testCustomProvider: 'llm:testCustomProvider'
 } as const
 
 /** Prefix of the undo label of an agent turn (`Agent: <first words of the prompt>`). */
@@ -138,6 +144,13 @@ export type KeyStatus = 'none' | 'stored' | 'env'
 
 export interface LlmProviderInfo {
   id: string
+  /** Label for the UI (the id when providers.md gives no name). */
+  name: string
+  /** Added in Settings with Add provider: it can be edited and removed there. */
+  custom: boolean
+  concurrency: number
+  concurrencyAuto: boolean
+  jsonSchema: boolean
   kind: string
   enabled: boolean
   local: boolean
@@ -191,6 +204,30 @@ export interface LlmAddModel {
   tools?: boolean
   vision?: boolean
 }
+
+/** The Add provider / Edit provider form. */
+export interface LlmCustomProviderForm {
+  /** Set when editing a custom provider. */
+  id?: string
+  name: string
+  baseUrl: string
+  /** Stored in the credential store, never in providers.md. Empty on an edit keeps the stored key. */
+  apiKey?: string
+  /** Local / free: no key needed. */
+  free: boolean
+  jsonSchema: boolean
+  concurrency: number | 'auto'
+  enabled: boolean
+}
+
+export interface LlmCustomProviderTest {
+  baseUrl: string
+  apiKey?: string
+  /** The provider being edited: its stored key is used when `apiKey` is empty. */
+  id?: string
+}
+
+export type LlmCustomProviderTestResult = { ok: true; models: number } | { ok: false; error: string }
 
 export interface LlmOverview {
   providers: LlmProviderInfo[]

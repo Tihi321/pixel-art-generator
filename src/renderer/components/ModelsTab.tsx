@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { LlmModelInfo, LlmProviderInfo } from '../../shared/agent'
+import { llmApi } from '../lib/agentApi'
 import { useChat } from '../state/chat'
 import { Badges } from './Badges'
+import { CustomProviderForm } from './CustomProviderForm'
 
 interface Row {
   ref: string
@@ -52,6 +54,9 @@ export function ModelsTab() {
   const [shownOnly, setShownOnly] = useState(false)
   const [add, setAdd] = useState({ id: '', priceIn: '', priceOut: '', context: '' })
   const [addError, setAddError] = useState('')
+  /** The Add / Edit provider form: 'new', a custom provider's id, or closed. */
+  const [form, setForm] = useState<'new' | string | null>(null)
+  const [removeError, setRemoveError] = useState('')
 
   const providers = useMemo(() => (overview?.providers ?? []).filter((p) => p.kind !== 'mock'), [overview])
   const models = overview?.models
@@ -121,13 +126,51 @@ export function ModelsTab() {
               title={p.available ? undefined : p.unavailableReason}
               data-testid={`models-provider-${p.id}`}
             >
-              <span>{p.id}</span>
+              <span>{p.name}</span>
               <span className="hint">{p.available ?`${(models ?? []).filter((m) => m.provider === p.id && m.shown).length} ticked` : shortReason(p)}</span>
             </button>
           ))}
+          <button onClick={() => setForm('new')} data-testid="models-add-provider">
+            + Add provider
+          </button>
         </div>
-        {current ? (
+        {form !== null ? (
+          <CustomProviderForm
+            key={form}
+            provider={form === 'new' ? undefined : providers.find((p) => p.id === form)}
+            onDone={(id) => {
+              setForm(null)
+              if (id) setProvider(id)
+            }}
+          />
+        ) : current ? (
           <div className="models-pane">
+            {current.custom && (
+              <div className="row-buttons">
+                <span className="hint mono">{current.baseUrl}</span>
+                <span className="spacer" />
+                <button onClick={() => setForm(current.id)} data-testid="models-edit-provider">
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    if (!window.confirm(`Remove the provider ${current.name}? Its key and ticked models are removed too.`)) return
+                    setRemoveError('')
+                    llmApi
+                      .removeCustomProvider(current.id)
+                      .then((o) => {
+                        chat.setOverview(o)
+                        setProvider(null)
+                      })
+                      .catch((e) => setRemoveError(msg(e)))
+                  }}
+                  data-testid="models-remove-provider"
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+            {removeError && <div className="error">{removeError}</div>}
             <div className="row-buttons">
               <input type="text" value={filter} placeholder="Filter, e.g. qwen free" onChange={(e) => setFilter(e.target.value)} data-testid="models-filter" />
               {current.canList && (

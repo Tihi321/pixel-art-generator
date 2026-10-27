@@ -31,6 +31,10 @@ export const providerModelSchema = z.looseObject({
 export const providerEntrySchema = z.looseObject({
   id: z.string().min(1),
   kind: z.enum(['openai-compat', 'anthropic', 'gemini', 'mock']),
+  /** Label for the UI; the id when missing. */
+  name: z.string().optional(),
+  /** Added in Settings > Models > Add provider: the form may edit and remove it. */
+  custom: z.boolean().default(false),
   enabled: z.boolean().default(true),
   local: z.boolean().default(false),
   base_url: z.string().optional(),

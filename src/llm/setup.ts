@@ -1,6 +1,7 @@
 import { defaultConfigDir, ensureConfigDir, ModelRegistry } from './registry'
 import type { RegistryOptions } from './registry'
 import { ModelRouter } from './router'
+import { migrateProviders } from './seedMigration'
 import type { RouterOptions } from './router'
 
 export interface CreateLlmOptions extends RegistryOptions {
@@ -20,7 +21,9 @@ export interface CreateLlmOptions extends RegistryOptions {
  */
 export async function createLlm(opts: CreateLlmOptions = {}): Promise<{ registry: ModelRegistry; router: ModelRouter; configDir: string }> {
   const configDir = opts.configDir ?? defaultConfigDir()
-  await ensureConfigDir(configDir, opts.seedDir)
+  const written = await ensureConfigDir(configDir, opts.seedDir)
+  // providers a newer seed has are copied into an existing providers.md once (seedMigration.ts); a failure never blocks the start
+  if (opts.seedDir) await migrateProviders(configDir, opts.seedDir, { fresh: written.includes('providers.md') }).catch(() => undefined)
   const registry = new ModelRegistry(configDir, opts)
   await registry.load()
   if (opts.discover !== false) {

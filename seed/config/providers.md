@@ -110,6 +110,16 @@ providers:
     concurrency: 1
     discover: true                # discovered models get tools: false (JSON-action mode) unless you list them below
     models: []
+  - id: acp
+    kind: openai-compat
+    name: ACP proxy
+    enabled: false                # switch on when the ACP proxy runs (Codex / Antigravity / Claude subscriptions behind an OpenAI-style API)
+    local: true                   # no key, no cost shown: the subscription pays
+    base_url: http://127.0.0.1:7461/v1
+    concurrency: 2
+    discover: true                # ids look like codex/gpt-5.6-luna or antigravity/gemini-3.8-flash; Detect models lists them, tick the ones you want
+    json_schema: false            # the proxy does not constrain a structured answer
+    models: []
   - id: openai
     kind: openai-compat
     base_url: https://api.openai.com/v1
@@ -202,6 +212,7 @@ A model is written `provider/model`, for example `lmstudio/google/gemma-4-e4b`. 
 ## Fields of a provider
 
 - `id`: the name used in model references.
+- `name`: optional label shown in Settings (falls back to the id). `custom: true` marks a provider added in Settings > Models > Add provider: only those can be edited or removed there.
 - `kind`: `openai-compat` (any OpenAI-style API: LM Studio, Strata, DeepSeek, OpenRouter, Ollama, OpenAI), `anthropic`, `gemini`, or `mock` (scripted, for tests).
 - `enabled`: `false` switches the provider off. A provider whose key can't be found is skipped automatically.
 - `local`: `true` for models on this machine. Local models cost nothing. Models of a local provider default to `tools: false`.
@@ -212,6 +223,12 @@ A model is written `provider/model`, for example `lmstudio/google/gemma-4-e4b`. 
 - `discover: free` (OpenRouter): only the models the provider lists at price 0 are added (context, tools and vision come from its list), and the models listed here are kept. Tick the ones you want in Settings > Models. `discover_skip`: a list of words; a discovered model whose id contains one of them (any case) is left out.
 - `json_schema`: `true` (the default) sends the JSON schema of a structured answer as `response_format`. Set `false` for a server that answers a bad JSON reply with an error.
 - `load_models` (LM Studio): load a model that isn't loaded yet with `lmstudio_parallel`, `lmstudio_context` and `lmstudio_ttl_minutes`. The context size in Settings replaces `lmstudio_context` and every `load_context`, and a model loaded with a smaller context is loaded again on its next request.
+
+## ACP proxy and your own providers
+
+The `acp` entry points at the ACP proxy (`http://127.0.0.1:7461/v1`), an OpenAI-compatible API over your Codex, Antigravity and Claude subscriptions. It is off: set `enabled: true` (or add it in Settings) once the proxy runs, press **Detect models** in Settings > Models and tick the ids you want (`acp/codex/gpt-5.6-luna`). The proxy needs `PROXY_IGNORE_SAMPLING=1` because Pixel Studio sends `temperature` and `max_tokens`. Its models are text only, and listed as `tools: false` unless you list them above with `tools: true`.
+
+Any other OpenAI-compatible server (llama.cpp, vLLM, a hosted API) can be added in Settings > Models with **+ Add provider** (name, base URL, key, parallel requests, send JSON schema, enabled). It is written here with `custom: true`, its key goes to the Windows credential store as `CUSTOM_<ID>_API_KEY`. The ids of the built-in providers cannot be reused. When a newer version of Pixel Studio ships a provider this file lacks, it is copied in once (`seed-state.json` remembers it, so one you delete is not added back).
 
 ## Fields of a model
 

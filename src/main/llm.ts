@@ -1,10 +1,16 @@
 // Main-process LLM service: lazily creates the registry/router from ~/PixelStudio/config, answers the
 // Settings dialog (providers, models, keys) and picks the model for a chat run. No Electron import.
 
+import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import {
   createLlm,
   addModel,
+  checkBaseUrl,
+  editModelChoices,
+  keyNameOf,
+  removeCustomProviderEntry,
+  upsertCustomProvider,
   deleteStoredKey,
   getStoredKey,
   resolveKey,
@@ -16,7 +22,7 @@ import {
   type ModelRegistry,
   type ModelRouter
 } from '../llm'
-import type { KeyStatus, LlmAddModel, LlmCatalog, LlmModelInfo, LlmOverview, LlmProviderInfo } from '../shared/agent'
+import type { KeyStatus, LlmAddModel, LlmCatalog, LlmCustomProviderForm, LlmCustomProviderTest, LlmCustomProviderTestResult, LlmModelInfo, LlmOverview, LlmProviderInfo } from '../shared/agent'
 import { CONTEXT_SIZE_MAX, CONTEXT_SIZE_MIN, readAppSettings, writeAppSettings } from './appSettings'
 import { defaultRoot } from './services'
 
@@ -51,6 +57,8 @@ export interface LlmServiceOptions {
   discover?: boolean
   /** Default `~/PixelStudio`, shown read-only in Settings. */
   dataDir?: string
+  /** For tests: replaces `fetch` in the provider clients. */
+  fetchImpl?: typeof fetch
 }
 
 export interface ResolvedModel {
@@ -109,7 +117,8 @@ export class LlmService {
         configDir: this.configDir,
         seedDir: this.opts.seedDir,
         keys: this.keys.resolve,
-        discover: this.opts.discover
+        discover: this.opts.discover,
+        fetchImpl: this.opts.fetchImpl
       })
         .then(async (l) => {
           l.registry.setContextSize((await readAppSettings(this.configDir)).contextSize)
@@ -148,6 +157,11 @@ export class LlmService {
     const { registry, router } = loaded
     const providers: LlmProviderInfo[] = [...registry.providers.values()].map((p) => ({
       id: p.id,
+      name: p.name,
+      custom: p.custom,
+      concurrency: p.concurrency,
+      concurrencyAuto: p.concurrencyAuto,
+      jsonSchema: p.jsonSchema,
       kind: p.kind,
       enabled: p.enabled,
       local: p.local,
@@ -284,6 +298,62 @@ export class LlmService {
     const { registry } = await this.get()
     await addModel(registry, cmd)
     return this.afterEdit()
+  }
+
+  /**
+   * Adds a custom OpenAI-compatible provider to providers.md (before `mock`), or edits the one with `form.id`. Only entries with
+   * `custom: true` are touched. The key goes to the credential store. The registry reloads and asks for the models: no restart.
+   */
+  async saveCustomProvider(form: LlmCustomProviderForm): Promise<LlmOverview> {
+    const { registry } = await this.get()
+    const file = join(this.configDir, 'providers.md')
+    const key = form.apiKey?.trim()
+    const existingKey = form.id ? registry.providers.get(form.id)?.apiKeyEnv : undefined
+    const { text, id } = upsertCustomProvider(await fs.readFile(file, 'utf8'), {
+      id: form.id,
+      name: form.name,
+      baseUrl: form.baseUrl,
+      hasKey: !!key || !!existingKey,
+      free: form.free,
+      jsonSchema: form.jsonSchema,
+      concurrency: form.concurrency,
+      enabled: form.enabled
+    })
+    await fs.writeFile(file, text, 'utf8')
+    if (key) this.keys.set(keyNameOf(id), key)
+    return this.reload()
+  }
+
+  /** Removes a custom provider, its stored key, its ticked and picked models, and the chat's selection when it was one of them. */
+  async removeCustomProvider(id: string): Promise<LlmOverview> {
+    await this.get()
+    const file = join(this.configDir, 'providers.md')
+    const { text, keyEnv } = removeCustomProviderEntry(await fs.readFile(file, 'utf8'), id)
+    await fs.writeFile(file, text, 'utf8')
+    if (keyEnv) this.keys.delete(keyEnv)
+    await editModelChoices(this.configDir, (c) => {
+      for (const ref of [...c.shown]) if (ref.startsWith(`${id}/`)) c.shown.delete(ref)
+      c.picked = c.picked.filter((m) => m.provider !== id)
+    })
+    if ((await this.selectedModel())?.startsWith(`${id}/`)) await this.setSelectedModel(null)
+    return this.reload(false)
+  }
+
+  /** `GET /models` on the address of the form, before it is saved. Never throws: the answer says what went wrong. */
+  async testCustomProvider(cmd: LlmCustomProviderTest): Promise<LlmCustomProviderTestResult> {
+    const url = checkBaseUrl(cmd.baseUrl)
+    if ('error' in url) return { ok: false, error: url.error }
+    try {
+      const { registry } = await this.get()
+      let apiKey = cmd.apiKey?.trim() || undefined
+      if (!apiKey && cmd.id) {
+        const env = registry.providers.get(cmd.id)?.apiKeyEnv
+        if (env) apiKey = this.keys.resolve(env)
+      }
+      return { ok: true, models: await registry.testEndpoint(url.url, apiKey) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   }
 
   /** Re-reads the config files (models.md changed), keeping what discovery found. */
