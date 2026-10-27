@@ -28,3 +28,8 @@ Live results (proxy 7461, prefixed ids only): a) 0.4-1.2 s, b) 0.5-0.7 s, c) cod
 
 Verification: vitest 519 passed, tsc, eslint, build ok. ~/PixelStudio/config unchanged (diff -r against config.bak-par15 identical).
 Not verified: the real config folder was never opened by the app (a copy was); keyring-stored key path; claude/anthropic models on the proxy; more than ~14 agent runs of reliability.
+
+## Open follow-ups
+
+- Agent run can end with a successful last call but an empty canvas: needs a result check (the failed-last-action guard does not catch it).
+- Gemini model option sometimes missing from the chat model list right after a failed codex run (cause unknown; the spec logs options).
