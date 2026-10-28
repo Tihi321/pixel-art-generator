@@ -15,6 +15,10 @@ export interface ToolHost {
   tools(): ToolDef[]
   /** Runs a tool. It may throw: the agent turns that into an error result for the model. */
   execute(name: string, args: unknown, signal: AbortSignal): Promise<ToolResult>
+  /** True when a call to this tool is meant to change the document (the end-of-run result check). Absent: the check is off. */
+  mutates?(name: string): boolean
+  /** A short fingerprint of the active document's content, or null when unknown. Equal at the start and the end of a run: nothing changed. Absent: the check is off. */
+  fingerprint?(signal: AbortSignal): Promise<string | null>
 }
 
 export interface ModelCapabilities {
@@ -87,10 +91,13 @@ export const actionSchema = z.object({
 type ActionReply = z.output<typeof actionSchema>
 
 /** A model that answers the first JSON reply with "I can't use tools / text-only" (some proxied coding agents do, now and then) instead of calling one. */
-export const NO_TOOLS_REFUSAL = /text-only|(?:can(?:'|’)?t|cannot|unable to|not able to|won(?:'|’)?t be able to)\s+(?:\w+\s+){0,4}(?:use|call|run|invoke)\s+(?:\w+\s+)?tools?|(?:disallow|forbid|prohibit)\w*\s+(?:\w+\s+)?tool|without\s+(?:using\s+)?tools?|tool calls? (?:are|is) (?:not allowed|disabled|unavailable)/i
+export const NO_TOOLS_REFUSAL = /text-only|(?:can(?:'|’)?t|cannot|unable to|not able to|won(?:'|’)?t be able to)\s+(?:\w+\s+){0,4}(?:use|call|run|invoke)\s+(?:\w+\s+)?tools?|(?:disallow|forbid|prohibit)\w*\s+(?:\w+\s+)?tool|without\s+(?:using\s+)?tools?|tool calls? (?:are|is) (?:not allowed|disabled|unavailable)|tool (?:use|access) (?:was|is|has been) (?:[a-z]+ )?(?:disabled|unavailable|not allowed)|not to use (?:any )?tools/i
 
 /** How often one run may send the model back to fix a failed last action before it is allowed to end the turn. */
 export const MAX_ERROR_NUDGES = 2
+
+/** How often one run may send the model back because its actions ran but the document is unchanged (or still empty). */
+export const MAX_RESULT_NUDGES = 2
 
 /** Describes the tools and the reply format for models without native tool calling. */
 export function jsonModeInstructions(tools: ToolDef[]): string {
@@ -277,6 +284,25 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     return `Your last action failed and nothing after it succeeded:\n${lastError.slice(0, 600)}\nFix the problem and retry with a corrected action, or explain to the user why it cannot be done. Do not say the task is finished while this error stands.`
   }
 
+  /**
+   * The model is about to end the turn. When the run executed a mutating action but the document fingerprint equals the one from
+   * the start of the run (nothing was made, or it is still empty), returns one corrective message (at most MAX_RESULT_NUDGES per run).
+   * Independent of errorRetry, which is asked first. Off when the host has no fingerprint, for runs without a mutating action
+   * (plain questions) and when the document changed.
+   */
+  const resultRetry = async (): Promise<string | undefined> => {
+    if (!ranMutating || startPrint == null || resultNudges >= MAX_RESULT_NUDGES || !opts.host.fingerprint || signal.aborted) return undefined
+    let now: string | null
+    try {
+      now = await opts.host.fingerprint(signal)
+    } catch {
+      return undefined
+    }
+    if (now == null || now !== startPrint) return undefined
+    resultNudges++
+    return 'Your actions ran, but the canvas is unchanged (still empty) compared to the start of this run. Check what went wrong (read the results above, look at the artwork with the read or preview tools) and draw it, or explain to the user why it cannot be done. Do not say the task is finished while the canvas is unchanged.'
+  }
+
   // JSON-action fallback
   const system = `${opts.system}\n\n${jsonModeInstructions(tools)}`
   let nudges = 0
@@ -284,6 +310,17 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   let errorNudges = 0
   /** The error text of the last action when no later action succeeded, else null. */
   let lastError: string | null = null
+  let ranMutating = false
+  let resultNudges = 0
+  /** The document fingerprint at the start of the run (null/undefined: unknown, the result check is off). */
+  let startPrint: string | null | undefined
+  if (opts.host.fingerprint && opts.host.mutates) {
+    try {
+      startPrint = await opts.host.fingerprint(signal)
+    } catch {
+      startPrint = undefined
+    }
+  }
   for (let step = 1; step <= maxSteps; step++) {
     if (signal.aborted) return finish('aborted')
     steps = step
@@ -306,7 +343,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     }
     if (reply.say) emit({ type: 'text', text: reply.say })
     if (!reply.actions.length) {
-      const fix = errorRetry()
+      const fix = errorRetry() ?? (await resultRetry())
       if (fix) {
         convo.push({ role: 'user', content: fix })
         continue
@@ -323,6 +360,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
         continue
       }
       ranAction = true
+      if (opts.host.mutates?.(action.tool)) ranMutating = true
       const result = await runTool(`json_${step}_${i}`, action.tool, action.args)
       lastError = result.isError ? errorText(result) : null
       const content = toolResultContent(result, caps.vision, maxChars)
@@ -330,7 +368,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       if (typeof content === 'string') parts.push({ type: 'text', text: `${head}\n${content}` })
       else parts.push({ type: 'text', text: head }, ...content)
     }
-    const fix = reply.done && !aborted && !signal.aborted ? errorRetry() : undefined
+    const fix = reply.done && !aborted && !signal.aborted ? (errorRetry() ?? (await resultRetry())) : undefined
     if (fix) parts.push({ type: 'text', text: fix })
     const text = parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
     convo.push({ role: 'user', content: parts.some((p) => p.type === 'image') ? parts : text })

@@ -27,11 +27,17 @@ test.beforeAll(async () => {
   await page.setViewportSize({ width: 1500, height: 950 }).catch(() => undefined)
   await page.getByTestId('tab-chat').click()
   await expect.poll(() => page.evaluate<boolean>('!!window.__pixelStudio'), { timeout: 30000 }).toBe(true)
+  // PAR-16: a failing test makes Playwright restart the worker, so this hook runs again on a FRESH home copied from the real config, where the
+  // acp models are not ticked: the next test then saw no acp options in the chat list (it looked like the app dropped them). Tick the two
+  // models the chat runs use here, so every test starts from the same state, whatever ran before.
+  await page.evaluate(`window.pixelStudio.invoke('llm:showModels', ${JSON.stringify(CHAT_MODELS)}, true)`)
 })
 
 test.afterAll(async () => {
   await launched?.close()
 })
+
+const CHAT_MODELS = ['acp/codex/gpt-5.6-luna', 'acp/antigravity/gemini-3.8-flash']
 
 const modelSelect = () => page.getByTestId('chat-model')
 
@@ -101,6 +107,7 @@ const REPEAT = Number(process.env.ACP_REPEAT ?? 1)
 
 async function drawHeartOnce(ref: string, n: number): Promise<string | null> {
   await page.getByTestId('chat-new').click()
+  await modelSelect().focus() // the list refreshes when the select gets focus
   try {
     await expect(modelSelect().locator(`option[value="${ref}"]`)).toHaveCount(1, { timeout: 15000 })
   } catch (e) {
@@ -131,7 +138,7 @@ async function drawHeartOnce(ref: string, n: number): Promise<string | null> {
   return null
 }
 
-for (const ref of ['acp/codex/gpt-5.6-luna', 'acp/antigravity/gemini-3.8-flash']) {
+for (const ref of CHAT_MODELS) {
   test(`c) the agent chat draws a heart with ${ref}`, async () => {
     test.setTimeout(Math.max(1, REPEAT) * 8 * 60_000)
     const failures: string[] = []

@@ -9,6 +9,7 @@ import { IPC } from '../shared/ipc'
 import type { ToolCancelRequest, ToolExecuteRequest, ToolResultPayload, ToolTurnRequest } from '../shared/ipc'
 import type { ToolDef, ToolResult, TurnToolHost } from '../shared/tools'
 import { createDefaultRegistry } from '../tools/defs'
+import { isMutatingTool } from '../tools/defs/reading'
 
 /** Where requests are sent: `webContents` satisfies this (`send(channel, ...args)`). */
 export interface BridgeTarget {
@@ -50,6 +51,7 @@ export class ToolBridge implements TurnToolHost {
   private readonly readyTimeoutMs: number
   private readonly toolSource: ToolDef[] | (() => ToolDef[]) | undefined
   private cachedTools: ToolDef[] | null = null
+  private registry: ReturnType<typeof createDefaultRegistry> | null = null
   private ready: boolean
   private readyWaiters: Array<() => void> = []
   private pending = new Map<string, Pending>()
@@ -121,6 +123,24 @@ export class ToolBridge implements TurnToolHost {
     const p = reply.payload
     if (p.error) return errorResult(`${name} failed in the editor: ${p.error}`)
     return p.result ?? errorResult(`${name} returned no result.`)
+  }
+
+  /** True when the tool is meant to change the document (see isMutatingTool). Unknown tools: false. */
+  mutates(name: string): boolean {
+    const tool = (this.registry ??= createDefaultRegistry()).get(name)
+    return tool ? isMutatingTool(tool) : false
+  }
+
+  /** A fingerprint of the active document (hash + empty flag), or null when the editor cannot tell. Never throws. */
+  async fingerprint(signal?: AbortSignal): Promise<string | null> {
+    try {
+      const r = await this.execute('canvas_fingerprint', {}, signal)
+      if (r.isError) return null
+      const first = r.content[0]
+      return first && first.type === 'text' ? first.text : null
+    } catch {
+      return null
+    }
   }
 
   async beginTurn(label?: string): Promise<void> {

@@ -7,6 +7,12 @@ What Pixel Studio still lacks, found while VN Studio and the creative hub (`C:\p
 - Every item found in the 2026-10-20 run is done on branch `PAR-07-13_roadmap` (PAR-07 to PAR-13: a `document` id on every tool plus `select_document` / `close_document`, the 2048x2048 import and WebP, `engine.lock`, polygons, gradients and images, pixel fonts and `draw_text`, expression sets, UI elements and 9-slice). This file stays as the place for new findings.
 - Headless MCP on `127.0.0.1:7457/mcp` (`--mcp-only`), used by VN Studio for pixel conversion and drawing. VN Studio's VNO-08 added a `grid` draw mode (one call per sprite), so the client provider can draw without a per-turn timeout.
 
+## PAR-16 Agent result check and the missing gemini option (2026-10-28, branch `PAR-16_agent-result-check`)
+
+- Done (both PAR-15 follow-ups). JSON-action mode now checks the result: when the model ends the turn after a mutating action and the document fingerprint (internal tool `canvas_fingerprint`, hidden from models and MCP) equals the one from the start of the run, it is sent back (max `MAX_RESULT_NUDGES` = 2, after the error guard). Plan: `.claude/tickets/PAR-16-agent-result-check/plan.md`.
+- The missing gemini option was not an app bug: when a live test fails, Playwright restarts the worker and `beforeAll` relaunches the app on a fresh copy of the real config, where the acp models are not ticked, so the next test saw no acp options at all. The spec now ticks its two models in `beforeAll`.
+- Left: the result check covers JSON-action mode only (native tool calling is not checked); the refusal nudge also recognizes `tool use was disabled` / `not to use tools`.
+
 ## PAR-15 ACP live UI check (2026-10-27, branch `PAR-15_acp-live-ui-check`)
 
 - Live Playwright spec `tests/e2e/acp-live.spec.ts` (run with `ACP_LIVE=1`, proxy on 7461): Settings > Models lists `acp` with prefixed ids only, the Add provider form (Test, detect, remove) and agent chat runs on `acp/codex/gpt-5.6-luna` and `acp/antigravity/gemini-3.8-flash` that draw a heart. It runs on an isolated home seeded with a copy of the real config.
