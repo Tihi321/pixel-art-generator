@@ -345,6 +345,21 @@ describe('agent loop, JSON-action fallback', () => {
     expect(d.requests).toHaveLength(3)
   })
 
+  it('the refusal nudge fires after a read-only action when no mutating action ran yet, not after a mutating one', async () => {
+    const refuse = reply({ say: 'The tool connection is unavailable: tool use was disabled.', actions: [], done: true })
+    const withCheck = (host: ToolHost): ToolHost => ({ ...host, mutates: (n: string) => n === 'draw', fingerprint: async () => 'same' })
+    const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    mock.script([reply({ actions: [{ tool: 'preview', args: {} }], done: false }), refuse, reply({ actions: [{ tool: 'draw', args: {} }], done: false }), reply({ actions: [], done: true })])
+    const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host: withCheck(makeHost().host) })
+    expect(res.reason).toBe('completed')
+    expect(text(mock.requests[2]!.messages.at(-1)!)).toMatch(/plain-text JSON protocol/)
+    // after a mutating action the same sentence is a normal end (the canvas never changes here, so only the result nudges follow)
+    const late = new MockProvider('mock', { chunkDelayMs: 1 })
+    late.script([reply({ actions: [{ tool: 'draw', args: {} }], done: false }), refuse])
+    await runAgent({ chat: mockChat(late), ...json, system: 's', userMessage: 'go', host: withCheck(makeHost().host) })
+    expect(late.requests.every((r) => !/plain-text JSON protocol/.test(text(r.messages.at(-1)!)))).toBe(true)
+  })
+
   describe('result check (action ran, document unchanged)', () => {
     const jsonOpts = { capabilities: { tools: false, vision: false } }
     /** A host whose fingerprint is read from `state.print`; `draw` changes it when `draws` is true. */
@@ -436,7 +451,10 @@ describe('agent loop, JSON-action fallback', () => {
       'This is a text-only request.',
       'I can’t edit the Pixel Studio document because tool use was disabled for this request.',
       'I can’t edit Pixel Studio because you instructed me not to use tools.',
-      'tool access was explicitly disabled for this turn'
+      'tool access was explicitly disabled for this turn',
+      'Tool use was disabled for this turn.',
+      'I was told not to use tools.',
+      'I was asked not to use any tools here.'
     ])
       expect(NO_TOOLS_REFUSAL.test(t), t).toBe(true)
     for (const t of [

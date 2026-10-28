@@ -138,7 +138,7 @@ async function drawHeartOnce(ref: string, n: number): Promise<string | null> {
   return null
 }
 
-for (const ref of CHAT_MODELS) {
+for (const ref of CHAT_MODELS.filter((r) => !process.env.ACP_ONLY || r.includes(process.env.ACP_ONLY))) { // ACP_ONLY=codex runs only the models whose ref contains that text
   test(`c) the agent chat draws a heart with ${ref}`, async () => {
     test.setTimeout(Math.max(1, REPEAT) * 8 * 60_000)
     const failures: string[] = []
