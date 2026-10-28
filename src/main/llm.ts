@@ -304,7 +304,11 @@ export class LlmService {
    * Adds a custom OpenAI-compatible provider to providers.md (before `mock`), or edits the one with `form.id`. Only entries with
    * `custom: true` are touched. The key goes to the credential store. The registry reloads and asks for the models: no restart.
    */
-  async saveCustomProvider(form: LlmCustomProviderForm): Promise<LlmOverview> {
+  saveCustomProvider(form: LlmCustomProviderForm): Promise<LlmOverview> {
+    return this.serializeProviderEdit(() => this.saveCustomProviderNow(form))
+  }
+
+  private async saveCustomProviderNow(form: LlmCustomProviderForm): Promise<LlmOverview> {
     const { registry } = await this.get()
     const file = join(this.configDir, 'providers.md')
     const key = form.apiKey?.trim()
@@ -325,7 +329,19 @@ export class LlmService {
   }
 
   /** Removes a custom provider, its stored key, its ticked and picked models, and the chat's selection when it was one of them. */
-  async removeCustomProvider(id: string): Promise<LlmOverview> {
+  removeCustomProvider(id: string): Promise<LlmOverview> {
+    return this.serializeProviderEdit(() => this.removeCustomProviderNow(id))
+  }
+
+  /** Edits of providers.md are read-modify-write: one at a time, in call order, so a double submit never loses an entry. */
+  private providerEdits: Promise<unknown> = Promise.resolve()
+  private serializeProviderEdit<T>(edit: () => Promise<T>): Promise<T> {
+    const run = this.providerEdits.then(edit, edit)
+    this.providerEdits = run.catch(() => undefined)
+    return run
+  }
+
+  private async removeCustomProviderNow(id: string): Promise<LlmOverview> {
     await this.get()
     const file = join(this.configDir, 'providers.md')
     const { text, keyEnv } = removeCustomProviderEntry(await fs.readFile(file, 'utf8'), id)

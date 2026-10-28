@@ -183,6 +183,25 @@ describe('LlmService', () => {
     expect(await readFile(providersFile, 'utf8')).not.toContain('home-proxy')
     expect(await readFile(path.join(dir, 'config', 'models.md'), 'utf8')).not.toContain('home-proxy')
   })
+
+  it('serializes concurrent provider edits: a double submit or parallel saves lose no entry', async () => {
+    const { ops } = fakeKeys()
+    const svc = new LlmService({ seedDir, configDir: path.join(dir, 'config'), dataDir: dir, keys: ops, discover: false })
+    await svc.overview()
+    const form = (name: string) => ({ name, baseUrl: 'http://127.0.0.1:9000/v1', free: true, jsonSchema: false, concurrency: 1 as const, enabled: true })
+    const results = await Promise.allSettled([
+      svc.saveCustomProvider(form('Alpha')),
+      svc.saveCustomProvider(form('Beta')),
+      svc.saveCustomProvider(form('Gamma')),
+      svc.saveCustomProvider(form('alpha')) // a double submit of the first: refused, nothing lost
+    ])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'rejected'])
+    const text = await readFile(path.join(dir, 'config', 'providers.md'), 'utf8')
+    for (const id of ['alpha', 'beta', 'gamma']) expect(text).toContain(`id: ${id}`)
+    const [, removedBeta] = await Promise.all([svc.removeCustomProvider('alpha'), svc.removeCustomProvider('beta')])
+    expect(removedBeta.providers.filter((p) => p.custom).map((p) => p.id)).toEqual(['gamma'])
+    expect((await svc.overview()).providers.filter((p) => p.custom).map((p) => p.id)).toEqual(['gamma'])
+  })
 })
 
 describe('appSettings', () => {

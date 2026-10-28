@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { runAgent, toolResultContent } from '../../src/llm/agent'
+import { NO_TOOLS_REFUSAL, runAgent, toolResultContent } from '../../src/llm/agent'
 import type { AgentEvent, ToolHost, ToolResult } from '../../src/llm/agent'
 import { MockProvider } from '../../src/llm/mock'
 import type { MockReply } from '../../src/llm/mock'
@@ -280,11 +280,111 @@ describe('agent loop, JSON-action fallback', () => {
     expect(res.messages.some((m) => m.role === 'tool')).toBe(false)
   })
 
+  it('answers a first reply that refuses to use tools with one nudge, then runs the tools; repeated refusals end the run after two nudges', async () => {
+    const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    mock.script([
+      reply({ say: 'I can\u2019t use tools in this text-only request.', actions: [], done: true }),
+      reply({ say: 'Drawing', actions: [{ tool: 'draw', args: { n: 1 } }], done: false }),
+      reply({ say: 'Done', actions: [], done: true })
+    ])
+    const { host, calls } = makeHost()
+    const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host })
+    expect(res.reason).toBe('completed')
+    expect(calls).toEqual([{ name: 'draw', args: { n: 1 } }])
+    expect(text(mock.requests[1]!.messages.at(-1)!)).toMatch(/plain-text JSON protocol/)
+    // refusing again and again: two nudges at most, then the run ends
+    const again = new MockProvider('mock', { chunkDelayMs: 1 })
+    again.script([reply({ say: "I can't use tools.", actions: [], done: true })])
+    const r2 = await runAgent({ chat: mockChat(again), ...json, system: 's', userMessage: 'go', host: makeHost().host })
+    expect(r2.reason).toBe('completed')
+    expect(again.requests).toHaveLength(3)
+    // a plain answer is not nudged
+    const plain = new MockProvider('mock', { chunkDelayMs: 1 })
+    plain.script([reply({ say: 'Hello!', actions: [], done: true })])
+    await runAgent({ chat: mockChat(plain), ...json, system: 's', userMessage: 'hi', host: makeHost().host })
+    expect(plain.requests).toHaveLength(1)
+  })
+
+  it('after a failed LAST action the model gets one corrective message instead of ending the turn; not after a later success; capped at two', async () => {
+    const failing = { draw: () => ({ content: [{ type: 'text' as const, text: 'bad grid' }], isError: true }) }
+    // done: true right after a failing action -> corrected, then it fixes it
+    let calls = 0
+    const mk = (fails: number) => makeHost({ draw: () => (++calls <= fails ? { content: [{ type: 'text', text: 'bad grid' }], isError: true } : { content: [{ type: 'text', text: 'fine' }] }) })
+    const a = new MockProvider('mock', { chunkDelayMs: 1 })
+    a.script([
+      reply({ say: 'drawn', actions: [{ tool: 'draw', args: {} }], done: true }),
+      reply({ actions: [{ tool: 'draw', args: { n: 2 } }], done: true })
+    ])
+    const ra = await runAgent({ chat: mockChat(a), ...json, system: 's', userMessage: 'go', host: mk(1).host })
+    expect(ra.reason).toBe('completed')
+    expect(a.requests).toHaveLength(2)
+    expect(text(a.requests[1]!.messages.at(-1)!)).toContain('Your last action failed and nothing after it succeeded:\nbad grid')
+    // empty actions after a failure -> corrected as well
+    calls = 0
+    const b = new MockProvider('mock', { chunkDelayMs: 1 })
+    b.script([
+      reply({ actions: [{ tool: 'draw', args: {} }], done: false }),
+      reply({ say: 'all good', actions: [], done: true }),
+      reply({ actions: [{ tool: 'draw', args: {} }], done: false }),
+      reply({ actions: [], done: true })
+    ])
+    const rb = await runAgent({ chat: mockChat(b), ...json, system: 's', userMessage: 'go', host: mk(1).host })
+    expect(rb.reason).toBe('completed')
+    expect(text(b.requests[2]!.messages.at(-1)!)).toContain('Your last action failed and nothing after it succeeded:\nbad grid')
+    // a later success: no correction
+    calls = 0
+    const c = new MockProvider('mock', { chunkDelayMs: 1 })
+    c.script([reply({ actions: [{ tool: 'draw', args: {} }, { tool: 'draw', args: {} }], done: false }), reply({ say: 'done', actions: [], done: true })])
+    await runAgent({ chat: mockChat(c), ...json, system: 's', userMessage: 'go', host: mk(1).host })
+    expect(c.requests).toHaveLength(2)
+    // always failing: two corrections at most, then the turn ends
+    const d = new MockProvider('mock', { chunkDelayMs: 1 })
+    d.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+    const rd = await runAgent({ chat: mockChat(d), ...json, system: 's', userMessage: 'go', host: makeHost(failing).host })
+    expect(rd.reason).toBe('completed')
+    expect(d.requests).toHaveLength(3)
+  })
+
+  it('NO_TOOLS_REFUSAL matches explicit refusals only', () => {
+    for (const t of [
+      "I can't use tools in this text-only request.",
+      'I can\u2019t use tools in this request.',
+      "I can't modify the document without using tools.",
+      'This request disallows tool calls.',
+      'I am unable to call tools here.',
+      'I cannot run any tools.',
+      'This is a text-only request.'
+    ])
+      expect(NO_TOOLS_REFUSAL.test(t), t).toBe(true)
+    for (const t of [
+      'No tool needed: the answer is 42.',
+      'There is no tool for that, so here is a description.',
+      'I can use tools to draw it.',
+      'Drawing the heart with the tools now.',
+      'Nothing to do, the sprite is finished.',
+      ''
+    ])
+      expect(NO_TOOLS_REFUSAL.test(t), t).toBe(false)
+  })
+
+  it('takes two repair retries for broken JSON before giving up', async () => {
+    const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    mock.script(['{"say": "a', '{"actions": [', reply({ say: 'ok', actions: [], done: true })])
+    const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host: makeHost().host })
+    expect(res.reason).toBe('completed')
+    expect(mock.requests).toHaveLength(3)
+    const bad = new MockProvider('mock', { chunkDelayMs: 1 })
+    bad.script(['nope'])
+    const r2 = await runAgent({ chat: mockChat(bad), ...json, system: 's', userMessage: 'go', host: makeHost().host })
+    expect(r2.reason).toBe('error')
+    expect(r2.error?.message).toMatch(/after two repair attempts/)
+  })
+
   it('done: true with actions runs them and stops; an unknown tool is an error result; errors are reported to the model', async () => {
     const mock = new MockProvider('mock', { chunkDelayMs: 1 })
     mock.script([
       reply({ actions: [{ tool: 'bogus', args: {} }, { tool: 'draw', args: {} }], done: false }),
-      reply({ actions: [{ tool: 'draw', args: { n: 2 } }], done: true }),
+      reply({ actions: [{ tool: 'draw', args: { n: 3 } }], done: true }),
       reply({ actions: [], done: true })
     ])
     const { host, calls } = makeHost({ draw: (a) => ((a as { n?: number }).n === 2 ? { content: [{ type: 'text', text: 'bad' }], isError: true } : { content: [{ type: 'text', text: 'fine' }] }) })
@@ -293,7 +393,7 @@ describe('agent loop, JSON-action fallback', () => {
     expect(res.steps).toBe(2)
     expect(calls).toHaveLength(2)
     expect(text(mock.requests[1]!.messages.at(-1)!)).toMatch(/#1 bogus \(error\):\nUnknown tool "bogus"[^\n]*\n#2 draw:\nfine/)
-    expect(text(res.messages.at(-1)!)).toBe('Results of your actions:\n#1 draw (error):\nbad')
+    expect(text(res.messages.at(-1)!)).toBe('Results of your actions:\n#1 draw:\nfine')
   })
 
   it('repairs a reply that is not JSON, and takes JSON out of a code fence', async () => {
