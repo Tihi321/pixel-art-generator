@@ -19,9 +19,22 @@ const EXPECTED = [
 describe('createDefaultRegistry', () => {
   const registry = createDefaultRegistry()
 
-  it('contains all 71 tools', () => {
-    expect(registry.list()).toHaveLength(71)
-    expect(registry.list().map((t) => t.name).sort()).toEqual([...EXPECTED].sort())
+  it('contains all 71 tools (plus the internal canvas_fingerprint, which defs() hides)', () => {
+    expect(registry.list()).toHaveLength(72)
+    expect(registry.list().map((t) => t.name).sort()).toEqual([...EXPECTED, 'canvas_fingerprint'].sort())
+    expect(registry.defs().map((d) => d.name).sort()).toEqual([...EXPECTED].sort())
+  })
+
+  it('canvas_fingerprint changes when pixels change and reports empty', async () => {
+    const t = setup()
+    const read = async () => JSON.parse(resultText(await t.ok('canvas_fingerprint'))) as { hash: string; empty: boolean }
+    const a = await read()
+    expect(a.empty).toBe(true)
+    expect((await read()).hash).toBe(a.hash)
+    await t.ok('draw_rect', { x: 1, y: 1, w: 3, h: 3, color: '#ff0000' })
+    const b = await read()
+    expect(b.empty).toBe(false)
+    expect(b.hash).not.toBe(a.hash)
   })
 
   it('has valid, unique, documented defs with object JSON schemas', () => {

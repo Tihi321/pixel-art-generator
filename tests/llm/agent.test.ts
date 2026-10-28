@@ -345,6 +345,101 @@ describe('agent loop, JSON-action fallback', () => {
     expect(d.requests).toHaveLength(3)
   })
 
+  it('the refusal nudge fires after a read-only action when no mutating action ran yet, not after a mutating one', async () => {
+    const refuse = reply({ say: 'The tool connection is unavailable: tool use was disabled.', actions: [], done: true })
+    const withCheck = (host: ToolHost): ToolHost => ({ ...host, mutates: (n: string) => n === 'draw', fingerprint: async () => 'same' })
+    const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+    mock.script([reply({ actions: [{ tool: 'preview', args: {} }], done: false }), refuse, reply({ actions: [{ tool: 'draw', args: {} }], done: false }), reply({ actions: [], done: true })])
+    const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host: withCheck(makeHost().host) })
+    expect(res.reason).toBe('completed')
+    expect(text(mock.requests[2]!.messages.at(-1)!)).toMatch(/plain-text JSON protocol/)
+    // after a mutating action the same sentence is a normal end (the canvas never changes here, so only the result nudges follow)
+    const late = new MockProvider('mock', { chunkDelayMs: 1 })
+    late.script([reply({ actions: [{ tool: 'draw', args: {} }], done: false }), refuse])
+    await runAgent({ chat: mockChat(late), ...json, system: 's', userMessage: 'go', host: withCheck(makeHost().host) })
+    expect(late.requests.every((r) => !/plain-text JSON protocol/.test(text(r.messages.at(-1)!)))).toBe(true)
+  })
+
+  describe('result check (action ran, document unchanged)', () => {
+    const jsonOpts = { capabilities: { tools: false, vision: false } }
+    /** A host whose fingerprint is read from `state.print`; `draw` changes it when `draws` is true. */
+    function printHost(state: { print: string | null }, draws: boolean) {
+      const { host, calls } = makeHost({
+        draw: () => {
+          if (draws) state.print = 'changed'
+          return { content: [{ type: 'text', text: 'draw ok' }] }
+        }
+      })
+      return { host: { ...host, mutates: (n: string) => n === 'draw', fingerprint: async () => state.print } as ToolHost, calls }
+    }
+    const run = (mock: MockProvider, host: ToolHost) => runAgent({ chat: mockChat(mock), ...jsonOpts, system: 's', userMessage: 'go', host })
+
+    it('fires when a mutating action ran and the document is unchanged, and the model can then fix it', async () => {
+      const state = { print: 'empty' as string | null }
+      const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+      mock.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+      const { host } = printHost(state, false)
+      const r = await run(mock, host)
+      expect(r.reason).toBe('completed')
+      expect(mock.requests).toHaveLength(3) // first reply + two corrections (cap)
+      expect(text(mock.requests[1]!.messages.at(-1)!)).toContain('canvas is unchanged')
+    })
+
+    it('stops nudging once the model changes the document', async () => {
+      const state = { print: 'empty' as string | null }
+      const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+      let drawn = 0
+      const { host } = makeHost({
+        draw: () => {
+          if (++drawn === 2) state.print = 'drawn'
+          return { content: [{ type: 'text', text: 'ok' }] }
+        }
+      })
+      const h = { ...host, mutates: () => true, fingerprint: async () => state.print } as ToolHost
+      mock.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true }), reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+      const r = await run(mock, h)
+      expect(r.reason).toBe('completed')
+      expect(mock.requests).toHaveLength(2)
+      expect(drawn).toBe(2)
+    })
+
+    it('does not fire for a plain answer, when the document changed, or without a fingerprint', async () => {
+      const qa = new MockProvider('mock', { chunkDelayMs: 1 })
+      qa.script([reply({ say: 'a heart is red', actions: [], done: true })])
+      await run(qa, printHost({ print: 'empty' }, false).host)
+      expect(qa.requests).toHaveLength(1)
+
+      const changed = new MockProvider('mock', { chunkDelayMs: 1 })
+      changed.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+      await run(changed, printHost({ print: 'empty' }, true).host)
+      expect(changed.requests).toHaveLength(1)
+
+      const none = new MockProvider('mock', { chunkDelayMs: 1 })
+      none.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+      await run(none, makeHost().host)
+      expect(none.requests).toHaveLength(1)
+
+      const readOnly = new MockProvider('mock', { chunkDelayMs: 1 })
+      readOnly.script([reply({ actions: [{ tool: 'preview', args: {} }], done: true })])
+      await run(readOnly, printHost({ print: 'empty' }, false).host)
+      expect(readOnly.requests).toHaveLength(1)
+    })
+
+    it('the error guard comes first and the two caps are independent', async () => {
+      const state = { print: 'empty' as string | null }
+      const { host } = makeHost({ draw: () => ({ content: [{ type: 'text', text: 'bad grid' }], isError: true }) })
+      const h = { ...host, mutates: () => true, fingerprint: async () => state.print } as ToolHost
+      const mock = new MockProvider('mock', { chunkDelayMs: 1 })
+      mock.script([reply({ actions: [{ tool: 'draw', args: {} }], done: true })])
+      const r = await run(mock, h)
+      expect(r.reason).toBe('completed')
+      expect(text(mock.requests[1]!.messages.at(-1)!)).toContain('Your last action failed')
+      // 2 error nudges, then 2 result nudges, then the turn ends
+      expect(mock.requests).toHaveLength(5)
+      expect(text(mock.requests[3]!.messages.at(-1)!)).toContain('canvas is unchanged')
+    })
+  })
+
   it('NO_TOOLS_REFUSAL matches explicit refusals only', () => {
     for (const t of [
       "I can't use tools in this text-only request.",
@@ -353,7 +448,13 @@ describe('agent loop, JSON-action fallback', () => {
       'This request disallows tool calls.',
       'I am unable to call tools here.',
       'I cannot run any tools.',
-      'This is a text-only request.'
+      'This is a text-only request.',
+      'I can’t edit the Pixel Studio document because tool use was disabled for this request.',
+      'I can’t edit Pixel Studio because you instructed me not to use tools.',
+      'tool access was explicitly disabled for this turn',
+      'Tool use was disabled for this turn.',
+      'I was told not to use tools.',
+      'I was asked not to use any tools here.'
     ])
       expect(NO_TOOLS_REFUSAL.test(t), t).toBe(true)
     for (const t of [

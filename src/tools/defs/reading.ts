@@ -1,12 +1,70 @@
 import { z } from 'zod'
-import { type Raster, celToRaster, celKey, flattenFrame, frameIndex, layerIndex, readGrid } from '../../core'
+import { type Document, type Raster, celToRaster, celKey, flattenFrame, frameIndex, layerIndex, readGrid } from '../../core'
 import { defineTool, imageResult, jsonResult } from '../registry'
 import { renderPreview } from '../render'
 import { LAYER_REF_DESC, colorArg, describeFrame, frameRef, layerRef, obj, parseColor, resolveFrame, resolveLayer, targetShape } from '../util'
 
 const MAX_READ_SIDE = 128
 
+/** Tools that change the document although they are marked readOnly (they manage their own undo steps). */
+const MUTATING_READONLY = new Set(['import_image', 'draw_sprite_from_reference', 'make_expression_set'])
+
+/** FNV-1a over the document's structure and every cel: equal fingerprints mean equal content. */
+export function documentFingerprint(doc: Document): { hash: string; empty: boolean } {
+  let h = 0x811c9dc5
+  const mix = (n: number): void => {
+    h = Math.imul(h ^ (n | 0), 0x01000193)
+  }
+  const mixStr = (s: string): void => {
+    for (let i = 0; i < s.length; i++) mix(s.charCodeAt(i))
+    mix(0)
+  }
+  mixStr(doc.id)
+  mix(doc.width)
+  mix(doc.height)
+  for (const l of doc.layers) {
+    mixStr(l.id)
+    mixStr(l.name)
+    mix(l.visible ? 1 : 0)
+    mix(Math.round(l.opacity * 1000))
+    mixStr(String(l.blend))
+  }
+  for (const f of doc.frames) mixStr(f.id)
+  let empty = true
+  for (const key of [...doc.cels.keys()].sort()) {
+    const cel = doc.cels.get(key)!
+    mixStr(key)
+    mix(cel.x)
+    mix(cel.y)
+    mix(cel.w)
+    mix(cel.h)
+    for (let i = 0; i < cel.data.length; i++) {
+      const v = cel.data[i]!
+      mix(v)
+      if (empty && v >>> 24 !== 0) empty = false
+    }
+  }
+  return { hash: (h >>> 0).toString(16), empty }
+}
+
+export function isMutatingTool(tool: { name: string; readOnly: boolean; noTransaction: boolean }): boolean {
+  return MUTATING_READONLY.has(tool.name) || (!tool.readOnly && !tool.noTransaction)
+}
+
 export const readingTools = [
+  defineTool({
+    name: 'canvas_fingerprint',
+    group: 'reading',
+    readOnly: true,
+    internal: true,
+    description: 'Internal: a fingerprint of the active document (used by the agent to check that a run changed something).',
+    input: obj({}),
+    handler: (_args, { session }) => {
+      const { hash, empty } = documentFingerprint(session.doc)
+      return jsonResult({ hash, empty })
+    }
+  }),
+
   defineTool({
     name: 'read_grid',
     group: 'reading',

@@ -22,6 +22,10 @@ export interface ToolHost {
   tools(): ToolDef[]
   /** Runs a tool. It may throw: the agent turns that into an error result for the model. */
   execute(name: string, args: unknown, signal: AbortSignal): Promise<ToolResult>
+  /** True when a call to this tool is meant to change the document (the agent end-of-run result check). Absent: the check is off. */
+  mutates?(name: string): boolean
+  /** A short fingerprint of the active document's content, or null when unknown. Equal at the start and the end of a run: nothing changed. Absent: the check is off. */
+  fingerprint?(signal: AbortSignal): Promise<string | null>
 }
 
 /** A ToolHost that can also group several tool calls (one agent turn) into a single undo step. */

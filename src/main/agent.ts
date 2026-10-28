@@ -41,6 +41,8 @@ export function withAutoPreview(host: ToolHost, enabled: boolean): ToolHost {
   if (!enabled) return host
   return {
     tools: () => host.tools(),
+    ...(host.mutates ? { mutates: (name: string) => host.mutates!(name) } : {}),
+    ...(host.fingerprint ? { fingerprint: (signal: AbortSignal) => host.fingerprint!(signal) } : {}),
     async execute(name, args, signal) {
       const result = await host.execute(name, args, signal)
       if (!isDrawingTool(name) || result.isError || signal.aborted) return result

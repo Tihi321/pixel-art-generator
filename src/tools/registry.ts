@@ -33,6 +33,8 @@ export interface ToolDefinition<S extends z.ZodType = z.ZodType> {
   readOnly?: boolean
   /** True for undo/redo: do not wrap the call in a transaction. Default false. */
   noTransaction?: boolean
+  /** True for tools only the application calls (not offered to models or MCP clients). Default false. */
+  internal?: boolean
   /** `false` for tools that do not act on a document (they create or list documents): no `document` argument is added. */
   document?: false
   handler(args: z.output<S>, ctx: ToolContext): ToolResult | Promise<ToolResult>
@@ -46,6 +48,7 @@ export interface RegisteredTool {
   input: z.ZodType
   readOnly: boolean
   noTransaction: boolean
+  internal: boolean
   /** True when the tool acts on a document: it takes an optional `document` id and runs on that document's session. */
   targetsDocument: boolean
   handler(args: unknown, ctx: ToolContext): ToolResult | Promise<ToolResult>
@@ -67,6 +70,7 @@ export function defineTool<S extends z.ZodType>(def: ToolDefinition<S>): Registe
     targetsDocument,
     readOnly: def.readOnly ?? false,
     noTransaction: def.noTransaction ?? false,
+    internal: def.internal ?? false,
     handler: def.handler as RegisteredTool['handler']
   }
 }
@@ -179,7 +183,7 @@ export class ToolRegistry {
   /** LLM/MCP tool definitions with JSON-schema parameters generated from the zod inputs. */
   defs(): ToolDef[] {
     if (!this.defsCache) {
-      this.defsCache = this.list().map((t) => ({
+      this.defsCache = this.list().filter((t) => !t.internal).map((t) => ({
         name: t.name,
         description: t.description,
         parameters: toJsonSchema(t.input)
