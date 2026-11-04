@@ -1,7 +1,7 @@
 import { defaultConfigDir, ensureConfigDir, ModelRegistry } from './registry'
 import type { RegistryOptions } from './registry'
 import { ModelRouter } from './router'
-import { migrateProviders } from './seedMigration'
+import { migrateProviders, migrateStrataLoaded } from './seedMigration'
 import type { RouterOptions } from './router'
 
 export interface CreateLlmOptions extends RegistryOptions {
@@ -24,6 +24,8 @@ export async function createLlm(opts: CreateLlmOptions = {}): Promise<{ registry
   const written = await ensureConfigDir(configDir, opts.seedDir)
   // providers a newer seed has are copied into an existing providers.md once (seedMigration.ts); a failure never blocks the start
   if (opts.seedDir) await migrateProviders(configDir, opts.seedDir, { fresh: written.includes('providers.md') }).catch(() => undefined)
+  // Strata's fixed model rows become the `loaded` ones, once (strata-loaded-v1)
+  if (opts.seedDir) await migrateStrataLoaded(configDir, opts.seedDir).catch(() => undefined)
   const registry = new ModelRegistry(configDir, opts)
   await registry.load()
   if (opts.discover !== false) {
