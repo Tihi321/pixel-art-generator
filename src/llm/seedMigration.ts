@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
-import { isMap, isSeq, parseDocument } from 'yaml'
-import type { Document, Node, YAMLSeq } from 'yaml'
+import { isMap, isScalar, isSeq, parseDocument } from 'yaml'
+import type { Document, Node, YAMLMap, YAMLSeq } from 'yaml'
 import { providersSchema } from './config'
 import { splitFrontmatter } from './md'
 
@@ -68,19 +68,26 @@ const idOf = (item: unknown): string | undefined => {
 }
 const idsOf = (seq: YAMLSeq): string[] => seq.items.map(idOf).filter((id): id is string => id !== undefined)
 
-async function readState(file: string): Promise<string[] | undefined> {
+async function readStateObject(file: string): Promise<Record<string, unknown>> {
   try {
-    const data = JSON.parse(await fs.readFile(file, 'utf8')) as { providers?: unknown }
-    return Array.isArray(data.providers) ? data.providers.filter((p): p is string => typeof p === 'string') : undefined
+    const data: unknown = JSON.parse(await fs.readFile(file, 'utf8'))
+    return data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>) : {}
   } catch {
-    return undefined
+    return {}
   }
 }
 
+async function readState(file: string): Promise<string[] | undefined> {
+  const data = await readStateObject(file)
+  return Array.isArray(data.providers) ? data.providers.filter((p): p is string => typeof p === 'string') : undefined
+}
+
+/** Writes the provider list and keeps the other keys of the state file (`migrations`). */
 async function writeState(file: string, ids: Iterable<string>): Promise<void> {
   const providers = [...new Set(ids)].sort()
-  if (JSON.stringify(await readState(file)) === JSON.stringify(providers)) return
-  await fs.writeFile(file, JSON.stringify({ providers }, null, 2) + '\n', 'utf8')
+  const current = await readStateObject(file)
+  if (JSON.stringify(current.providers) === JSON.stringify(providers)) return
+  await fs.writeFile(file, JSON.stringify({ ...current, providers }, null, 2) + '\n', 'utf8')
 }
 
 /**
@@ -134,5 +141,97 @@ export async function migrateProviders(configDir: string, seedDir: string, opts:
     result.added = missing
   }
   await writeState(stateFile, [...offered, ...seedIds])
+  return result
+}
+
+/** The id `seed-state.json` records (`migrations`) once the Strata `loaded` migration has run. */
+export const STRATA_LOADED_MIGRATION = 'strata-loaded-v1'
+
+/** The refs of the Strata that had fixed model ids, and the neutral ones that replace them. The `-low` one first: the other is its prefix. */
+const STRATA_RENAMES: [string, string][] = [
+  ['strata/qwen3.8-flash-next-low', 'strata/default-low'],
+  ['strata/qwen3.8-flash-next', 'strata/default']
+]
+
+/** Exact-string rename of the old Strata refs (not inside a longer id). */
+export function renameStrataRefs(text: string): string {
+  let out = text
+  for (const [from, to] of STRATA_RENAMES) {
+    out = out.replace(new RegExp(`(?<![\\w/.-])${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`, 'g'), to)
+  }
+  return out
+}
+
+async function renameInFile(file: string): Promise<boolean> {
+  if (!existsSync(file)) return false
+  const text = await fs.readFile(file, 'utf8')
+  const next = renameStrataRefs(text)
+  if (next === text) return false
+  await fs.writeFile(file, next, 'utf8')
+  return true
+}
+
+/**
+ * Moves an existing config folder onto the `loaded` Strata, once (`strata-loaded-v1` in seed-state.json):
+ * - providers.md, provider `strata` (when the user still has it): without a `loaded` row it gets the seed's two `loaded` rows and `profiles`,
+ *   `discover: true`, and loses the rows whose ids are now their aliases; every other row and key stays. Nothing is added back later.
+ * - the old refs `strata/qwen3.8-flash-next(-low)` become `strata/default(-low)` in roles.md, models.md (`shown`) and app.json (`selectedModel`).
+ * A providers.md that can't be read or would be invalid after the change is left alone with a warning and the migration is not recorded.
+ */
+export async function migrateStrataLoaded(configDir: string, seedDir: string): Promise<{ changed: string[]; warnings: string[] }> {
+  const result = { changed: [] as string[], warnings: [] as string[] }
+  const stateFile = path.join(configDir, SEED_STATE_FILE)
+  const state = await readStateObject(stateFile)
+  const done = Array.isArray(state.migrations) ? state.migrations.filter((m): m is string => typeof m === 'string') : []
+  if (done.includes(STRATA_LOADED_MIGRATION)) return result
+
+  const file = path.join(configDir, 'providers.md')
+  let recorded = true
+  if (existsSync(file)) {
+    const mine = parseProviders(await fs.readFile(file, 'utf8'), 'providers.md')
+    const seed = parseProviders(await fs.readFile(path.join(seedDir, 'providers.md'), 'utf8'), 'the seed providers.md')
+    if (typeof mine === 'string' || typeof seed === 'string') {
+      result.warnings.push(`${typeof mine === 'string' ? mine : seed}: the Strata loaded rows were not added`)
+      recorded = false
+    } else {
+      const mineStrata = mine.providers.items.find((item) => idOf(item) === 'strata')
+      const seedStrata = seed.providers.items.find((item) => idOf(item) === 'strata')
+      const models = isMap(mineStrata) ? mineStrata.get('models', true) : undefined
+      const hasLoaded = isSeq(models) && models.items.some((m) => isMap(m) && m.get('loaded') === true)
+      if (isMap(mineStrata) && isMap(seedStrata) && !hasLoaded) {
+        const seedModels = seedStrata.get('models', true)
+        const rows = isSeq(seedModels) ? seedModels.items.filter((m): m is YAMLMap => isMap(m) && m.get('loaded') === true) : []
+        const aliases = new Set(rows.flatMap((r) => ((r.toJSON() as { aliases?: string[] }).aliases ?? [])))
+        const seedProfiles = seedStrata.get('profiles', true)
+        if (rows.length) {
+          const list: YAMLSeq = isSeq(models) ? models : mine.doc.createNode([])
+          list.items = [...rows.map((r) => r.clone() as Node), ...list.items.filter((m) => !(isMap(m) && aliases.has(String(m.get('id')))))]
+          if (!isSeq(models)) mineStrata.set('models', list)
+          const discover = mineStrata.items.find((pair) => isScalar(pair.key) && pair.key.value === 'discover')
+          if (discover && isScalar(discover.value)) discover.value.value = true
+          else mineStrata.set('discover', true)
+          if (!mineStrata.has('profiles') && isSeq(seedProfiles)) mineStrata.set('profiles', seedProfiles.clone())
+          const front = mine.doc.toString({ lineWidth: 0 }).replace(/\n/g, mine.nl)
+          const check = providersSchema.safeParse(parseDocument(front).toJS())
+          if (!check.success) {
+            result.warnings.push(`providers.md would be invalid with the Strata loaded rows (${check.error.issues[0]?.message ?? '?'}): left as it is`)
+            recorded = false
+          } else {
+            await fs.writeFile(file, mine.text.slice(0, mine.frontStart) + front + mine.text.slice(mine.frontStart + mine.front.length), 'utf8')
+            result.changed.push('providers.md')
+          }
+        }
+      }
+    }
+  }
+  for (const name of ['roles.md', 'models.md']) if (await renameInFile(path.join(configDir, name))) result.changed.push(name)
+  const appFile = path.join(configDir, 'app.json')
+  const app = await readStateObject(appFile)
+  const selected = typeof app.selectedModel === 'string' ? renameStrataRefs(app.selectedModel) : undefined
+  if (selected !== undefined && selected !== app.selectedModel) {
+    await fs.writeFile(appFile, JSON.stringify({ ...app, selectedModel: selected }, null, 2) + '\n', 'utf8')
+    result.changed.push('app.json')
+  }
+  if (recorded) await fs.writeFile(stateFile, JSON.stringify({ ...(await readStateObject(stateFile)), migrations: [...done, STRATA_LOADED_MIGRATION] }, null, 2) + '\n', 'utf8')
   return result
 }
