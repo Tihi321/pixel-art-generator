@@ -43,7 +43,7 @@ describe('LlmService', () => {
     const sonnet = o.models.find((m) => m.ref === 'anthropic/claude-sonnet-5-5')!
     expect(sonnet).toMatchObject({ tools: true, vision: true, local: false, available: true })
     expect(o.models.find((m) => m.ref === 'lmstudio/google/gemma-4-e4b')).toMatchObject({ tools: false, vision: true, local: true })
-    expect(o.defaultModel).toBe('lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp')
+    expect(o.defaultModel).toBe('acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs')
     expect(JSON.stringify(o)).not.toMatch(/secret/)
   })
 
@@ -103,7 +103,7 @@ describe('LlmService', () => {
     // an explicit ref wins over the saved one
     expect(await svc.resolveModel('lmstudio/google/gemma-4-e4b')).toMatchObject({ vision: true, ref: 'lmstudio/google/gemma-4-e4b' })
     await svc.setSelectedModel(null)
-    expect(await svc.resolveModel()).toMatchObject({ vision: true, ref: 'lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp' })
+    expect(await svc.resolveModel()).toMatchObject({ vision: false, ref: 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs' }) // the local default has no vision (the tools flag is asserted in registry.test.ts)
   })
 
   it('the context size from Settings is saved, applied to LM Studio loads and survives a restart', async () => {
@@ -137,7 +137,7 @@ describe('LlmService', () => {
       return String(url).endsWith('/v1/models') ? new Response(JSON.stringify({ data: [{ id: 'a/one' }, { id: 'a/two' }] })) : new Response('', { status: 404 })
     }) as unknown as typeof fetch
     const svc = new LlmService({ seedDir, configDir: path.join(dir, 'config'), dataDir: dir, keys: ops, fetchImpl })
-    expect((await svc.overview()).providers.find((p) => p.id === 'acp')).toMatchObject({ name: 'ACP proxy', custom: false, enabled: false, canList: true, concurrency: 2, jsonSchema: false })
+    expect((await svc.overview()).providers.find((p) => p.id === 'acp')).toMatchObject({ name: 'ACP proxy', custom: false, enabled: true, canList: true, concurrency: 4, jsonSchema: false })
 
     // reserved ids and a seed provider are refused, and nothing is written
     const providersFile = path.join(dir, 'config', 'providers.md')

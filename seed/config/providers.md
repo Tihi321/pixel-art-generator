@@ -37,6 +37,7 @@ providers:
         extra_body: { reasoning_effort: none }
   - id: strata
     kind: openai-compat
+    enabled: false                # off since HUB-38: Strata runs under the ACP proxy (acp/strata/...); the rows stay for a direct start
     local: true
     base_url: http://127.0.0.1:8080/v1
     api_key_env: STRATA_API_KEY   # optional: only sent if set
@@ -122,13 +123,48 @@ providers:
   - id: acp
     kind: openai-compat
     name: ACP proxy
-    enabled: false                # switch on when the ACP proxy runs (Codex / Antigravity / Claude subscriptions behind an OpenAI-style API)
+    enabled: true                 # the route to every model (HUB-38): cloud subscriptions and the local gufo / strata / llama ones
     local: true                   # no key, no cost shown: the subscription pays
-    base_url: http://127.0.0.1:7461/v1
-    concurrency: 2
-    discover: true                # ids look like codex/gpt-5.6-luna or antigravity/gemini-3.8-flash; Detect models lists them, tick the ones you want
+    base_url: http://127.0.0.1:8787/v1
+    concurrency: 4
+    discover: true                # ids look like codex/gpt-5.6-luna or strata/<model>; Detect models lists them, tick the ones you want
+    discover_skip: [ qwen-image, nomic-embed ]
     json_schema: false            # the proxy does not constrain a structured answer
-    models: []
+    models:
+      # Local models through the proxy (HUB-38). One local model is loaded at a time across gufo, strata and llama;
+      # a request for another one waits until the proxy has switched (minutes). roles.md `local` is the strata row.
+      # The proxy refuses tools for local models (400 model_not_capable): JSON-action mode.
+      - id: strata/qwen3.8-flash-next-unsloth-ud-iq4_xs
+        family: qwen
+        context: 131072
+        tools: false
+        extra_body: { reasoning_effort: none }
+      - id: gufo/Qwen3.8-27B
+        family: qwen
+        context: 32768
+        tools: false
+        extra_body: { reasoning_effort: none }
+      - id: gufo/deepseek4
+        family: deepseek
+        context: 16384
+        tools: false
+        extra_body: { reasoning_effort: none }
+      - id: gufo/flash-next-q4
+        family: qwen
+        context: 32768
+        tools: false
+        vision: true
+        extra_body: { reasoning_effort: none }
+      - id: llama/inkling-2-mini
+        family: inkling
+        context: 32768
+        tools: false
+        vision: true
+      - id: llama/inkling-2-mini-dspark
+        family: inkling
+        context: 32768
+        tools: false
+        vision: true
   - id: openai
     kind: openai-compat
     base_url: https://api.openai.com/v1
@@ -235,7 +271,7 @@ A model is written `provider/model`, for example `lmstudio/google/gemma-4-e4b`. 
 
 ## ACP proxy and your own providers
 
-The `acp` entry points at the ACP proxy (`http://127.0.0.1:7461/v1`), an OpenAI-compatible API over your Codex, Antigravity and Claude subscriptions. It is off: set `enabled: true` (or add it in Settings) once the proxy runs, press **Detect models** in Settings > Models and tick the ids you want (`acp/codex/gpt-5.6-luna`). The proxy needs `PROXY_IGNORE_SAMPLING=1` because Pixel Studio sends `temperature` and `max_tokens`. Its models are text only, and listed as `tools: false` unless you list them above with `tools: true`.
+The `acp` entry points at the ACP proxy (`http://127.0.0.1:8787/v1`), an OpenAI-compatible API over your Codex, Antigravity and Claude subscriptions and over the local models (`gufo/*`, `strata/*`, `llama/*`). It is on and is the route to every model, the local ones included; press **Detect models** in Settings > Models and tick the ids you want (`acp/codex/gpt-5.6-luna`). The proxy drops the sampling fields itself. Its models are text only, and discovered ones are `tools: false` unless you list them above with `tools: true`. The local rows are `tools: false` because the proxy answers a request with tools to a local model with 400 `model_not_capable`: the agent runs them in JSON-action mode. One local model is on the GPU at a time across gufo, strata and llama, and a switch to another takes minutes. LM Studio stays for the vision rows only (a chat with an attached image, picked in the model picker); the `strata` provider is off (its code stays), Strata runs under the proxy.
 
 Any other OpenAI-compatible server (llama.cpp, vLLM, a hosted API) can be added in Settings > Models with **+ Add provider** (name, base URL, key, parallel requests, send JSON schema, enabled). It is written here with `custom: true`, its key goes to the Windows credential store as `CUSTOM_<ID>_API_KEY`. The ids of the built-in providers cannot be reused. When a newer version of Pixel Studio ships a provider this file lacks, it is copied in once (`seed-state.json` remembers it, so one you delete is not added back).
 

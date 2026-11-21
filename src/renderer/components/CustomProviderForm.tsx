@@ -62,7 +62,7 @@ export function CustomProviderForm({ provider, onDone }: Props) {
         </label>
         <label>
           <span>Base URL</span>
-          <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:7461/v1" data-testid="provider-form-url" />
+          <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://127.0.0.1:8787/v1" data-testid="provider-form-url" />
         </label>
         <label>
           <span>API key</span>
