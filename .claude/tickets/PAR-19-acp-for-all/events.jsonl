@@ -1,0 +1,5 @@
+{"ts":"2026-11-21T18:58:49Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0030","ticket":"PAR-19-acp-for-all","detail":"branch PAR-19_acp-for-all cut from master"}
+{"ts":"2026-11-21T19:05:03Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0030","ticket":"PAR-19-acp-for-all","detail":"yarn test 531 passed, typecheck, build ok"}
+{"ts":"2026-11-21T19:05:03Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0030","ticket":"PAR-19-acp-for-all","detail":"changelog.md written, left in-progress"}
+{"ts":"2026-11-21T--:--:--Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0030","ticket":"PAR-19-acp-for-all","detail":"PASS: integration check, suite re-run by checker; no should-fix or blockers","data":{"verdict":"PASS","tests":531}}
+{"ts":"2026-11-21T--:--:--Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0030","ticket":"PAR-19-acp-for-all","detail":"plan done after PASS; live checks UNTESTED","data":{"status":"done"}}

@@ -1,6 +1,6 @@
-// Live check of the real app against the ACP proxy (http://127.0.0.1:7461). Skipped unless ACP_LIVE=1.
+// Live check of the real app against the ACP proxy (http://127.0.0.1:8787). Skipped unless ACP_LIVE=1.
 // The app runs on an isolated home seeded with a COPY of ~/PixelStudio/config, so the real folder is never written.
-// Spends model quota: two agent runs.
+// Spends model quota: three agent runs (the local one loads the GPU model).
 import { expect, test, type Page } from '@playwright/test'
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
@@ -10,13 +10,13 @@ import { type LaunchedApp, launchApp, projectRoot } from './launch'
 
 const live = process.env.ACP_LIVE === '1'
 const shots = path.join(projectRoot, '.claude/temp/par15-shots')
-const PROXY = 'http://127.0.0.1:7461/v1'
+const PROXY = 'http://127.0.0.1:8787/v1'
 
 let launched: LaunchedApp
 let page: Page
 
 test.describe.configure({ mode: 'default' })
-test.skip(!live, 'set ACP_LIVE=1 (needs the ACP proxy on 127.0.0.1:7461)')
+test.skip(!live, 'set ACP_LIVE=1 (needs the ACP proxy on 127.0.0.1:8787)')
 
 test.beforeAll(async () => {
   test.skip(!existsSync(path.join(projectRoot, 'out/main/index.js')), 'run `yarn build` first')
@@ -37,7 +37,8 @@ test.afterAll(async () => {
   await launched?.close()
 })
 
-const CHAT_MODELS = ['acp/codex/gpt-5.6-luna', 'acp/antigravity/gemini-3.8-flash']
+const LOCAL = 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs' // the hub's local default (HUB-38): the JSON-action mode through the proxy
+const CHAT_MODELS = ['acp/codex/gpt-5.6-luna', 'acp/antigravity/gemini-3.8-flash', LOCAL]
 
 const modelSelect = () => page.getByTestId('chat-model')
 
@@ -58,13 +59,13 @@ test('a) Settings > Models lists the acp provider and its prefixed models, no un
   await expect(acp).toBeVisible()
   await acp.click()
   await page.getByTestId('models-detect').click().catch(() => undefined)
-  const ids = ['codex/gpt-5.6-luna', 'antigravity/gemini-3.8-flash']
+  const ids = ['codex/gpt-5.6-luna', 'antigravity/gemini-3.8-flash', LOCAL.slice(4)]
   for (const id of ids) await expect(page.getByTestId(`models-row-acp/${id}`)).toBeVisible({ timeout: 30000 })
   const rows = await page.locator('[data-testid^="models-row-acp/"] .model-id').allTextContents()
   expect(rows.length).toBeGreaterThan(0)
-  for (const r of rows) expect(r, `unprefixed model id ${r}`).toMatch(/^(codex|antigravity)\//)
+  for (const r of rows) expect(r, `unprefixed model id ${r}`).toMatch(/^(codex|antigravity|strata|gufo|llama)\//)
   expect(new Set(rows).size).toBe(rows.length)
-  // Tick the two models the chat runs use.
+  // Tick the models the chat runs use.
   for (const id of ids) {
     const row = page.getByTestId(`models-row-acp/${id}`)
     if (!(await row.locator('input').isChecked())) await row.locator('input').click()

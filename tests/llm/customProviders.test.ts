@@ -4,10 +4,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseMdWith } from '../../src/llm/md'
-import { providersSchema } from '../../src/llm/config'
+import { providersSchema, rolesSchema } from '../../src/llm/config'
 import { checkBaseUrl, keyNameOf, providerIdsOf, removeCustomProviderEntry, slugOf, upsertCustomProvider, type CustomProviderInput } from '../../src/llm/customProviders'
 import { ModelRegistry } from '../../src/llm/registry'
-import { migrateProviders, migrateStrataLoaded, SEED_STATE_FILE } from '../../src/llm/seedMigration'
+import { migrateAcpPort, migrateProviders, migrateStrataLoaded, SEED_STATE_FILE } from '../../src/llm/seedMigration'
 import { createLlm } from '../../src/llm/setup'
 
 const seedDir = fileURLToPath(new URL('../../seed/config', import.meta.url))
@@ -35,7 +35,7 @@ describe('custom provider entries', () => {
   })
 
   it('checks the base URL', () => {
-    expect(checkBaseUrl(' http://127.0.0.1:7461/v1/ ')).toEqual({ url: 'http://127.0.0.1:7461/v1' })
+    expect(checkBaseUrl(' http://127.0.0.1:8787/v1/ ')).toEqual({ url: 'http://127.0.0.1:8787/v1' })
     expect(checkBaseUrl('ftp://x')).toHaveProperty('error')
     expect(checkBaseUrl('nope')).toHaveProperty('error')
   })
@@ -106,31 +106,39 @@ describe('custom provider entries', () => {
 })
 
 describe('the seed acp provider', () => {
-  it('is off, local, on the proxy port, without JSON schema, and discovers its models', async () => {
+  it('is on, local, on the proxy port, with the six local rows in JSON-action mode, and strata is off', async () => {
     const data = parseMdWith(await readFile(path.join(seedDir, 'providers.md'), 'utf8'), providersSchema).data
     expect(data.providers.find((p) => p.id === 'acp')).toMatchObject({
       kind: 'openai-compat',
       name: 'ACP proxy',
-      enabled: false,
+      enabled: true,
       local: true,
-      base_url: 'http://127.0.0.1:7461/v1',
-      concurrency: 2,
+      base_url: 'http://127.0.0.1:8787/v1',
+      concurrency: 4,
       json_schema: false,
-      discover: true,
-      models: []
+      discover: true
     })
+    const acp = data.providers.find((p) => p.id === 'acp')!
+    expect(acp.models.map((m) => m.id)).toEqual([
+      'strata/qwen3.8-flash-next-unsloth-ud-iq4_xs', 'gufo/Qwen3.8-27B', 'gufo/deepseek4', 'gufo/flash-next-q4', 'llama/inkling-2-mini', 'llama/inkling-2-mini-dspark'
+    ])
+    expect(acp.models.every((m) => m.tools === false)).toBe(true)
+    expect(data.providers.find((p) => p.id === 'strata')).toMatchObject({ enabled: false })
+    const roles = parseMdWith(await readFile(path.join(seedDir, 'roles.md'), 'utf8'), rolesSchema).data
+    expect(roles.aliases.local).toBe('acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs')
+    expect([roles.roles.artist?.models, roles.roles.palette?.models]).toEqual([['local'], ['local']])
   })
 
   it('discovers slash ids from /v1/models when enabled', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ps-acp-'))
     try {
-      const seed = (await readFile(path.join(seedDir, 'providers.md'), 'utf8')).replace(/(id: acp[\s\S]*?enabled: )false/, '$1true')
+      const seed = (await readFile(path.join(seedDir, 'providers.md'), 'utf8'))
       await writeFile(path.join(dir, 'providers.md'), seed)
       await writeFile(path.join(dir, 'roles.md'), await readFile(path.join(seedDir, 'roles.md'), 'utf8'))
       const calls: string[] = []
       const fetchImpl = (async (url: string) => {
         calls.push(String(url))
-        return String(url) === 'http://127.0.0.1:7461/v1/models'
+        return String(url) === 'http://127.0.0.1:8787/v1/models'
           ? new Response(JSON.stringify({ data: [{ id: 'codex/gpt-5.6-luna' }, { id: 'antigravity/gemini-3.8-flash' }] }))
           : new Response('', { status: 404 })
       }) as unknown as typeof fetch
@@ -140,9 +148,9 @@ describe('the seed acp provider', () => {
       expect(out.find((o) => o.provider === 'acp')).toEqual({ provider: 'acp', found: 2 })
       expect(registry.getModel('acp/codex/gpt-5.6-luna')).toMatchObject({ id: 'codex/gpt-5.6-luna', source: 'discovered', tools: false, priceIn: 0 })
       expect(registry.getModel('acp/antigravity/gemini-3.8-flash')).toMatchObject({ family: 'gemini', shown: false })
-      expect(registry.providers.get('acp')).toMatchObject({ local: true, jsonSchema: false, concurrency: 2, name: 'ACP proxy' })
+      expect(registry.providers.get('acp')).toMatchObject({ local: true, jsonSchema: false, concurrency: 4, name: 'ACP proxy' })
       expect((await registry.catalog('acp')).map((m) => m.id)).toEqual(['codex/gpt-5.6-luna', 'antigravity/gemini-3.8-flash'])
-      expect(await registry.testEndpoint('http://127.0.0.1:7461/v1')).toBe(2)
+      expect(await registry.testEndpoint('http://127.0.0.1:8787/v1')).toBe(2)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -161,7 +169,7 @@ describe('seed migration', () => {
   /** An older user file: the seed's providers without acp, with an edit and a comment. */
   async function oldFile(): Promise<string> {
     const seed = await readFile(path.join(seedDir, 'providers.md'), 'utf8')
-    const text = seed.replace(/ {2}- id: acp[\s\S]*? {4}models: \[\]\r?\n/, '').replace('concurrency: 8', 'concurrency: 3 # my edit')
+    const text = seed.replace(/ {2}- id: acp[\s\S]*?(?= {2}- id: (?:openai|mock))/, '').replace('concurrency: 8', 'concurrency: 3 # my edit')
     expect(text).not.toContain('id: acp')
     await writeFile(file(), text)
     return text
@@ -176,9 +184,9 @@ describe('seed migration', () => {
     expect(after.replace(/ {2}# ACP[\s\S]*/, '')).toBeTruthy()
     const data = parseMdWith(after, providersSchema).data
     expect(data.providers.map((p) => p.id)).toEqual(['lmstudio', 'strata', 'deepseek', 'openrouter', 'ollama', 'openai', 'anthropic', 'gemini', 'acp', 'mock'])
-    expect(data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: false, local: true, base_url: 'http://127.0.0.1:7461/v1' })
+    expect(data.providers.find((p) => p.id === 'acp')).toMatchObject({ enabled: true, local: true, base_url: 'http://127.0.0.1:8787/v1' })
     // everything else is byte for byte what it was
-    expect(after.replace(/ {2}- id: acp[\s\S]*? {4}models: \[\]\r?\n/, '')).toBe(before)
+    expect(after.replace(/ {2}- id: acp[\s\S]*?(?= {2}- id: (?:openai|mock))/, '')).toBe(before)
     expect((await state()).providers).toContain('acp')
     // a second run changes nothing
     expect(await migrateProviders(dir, seedDir, { fresh: false })).toEqual({ added: [], warnings: [] })
@@ -189,12 +197,12 @@ describe('seed migration', () => {
     await oldFile()
     await migrateProviders(dir, seedDir, { fresh: false })
     const withAcp = await readFile(file(), 'utf8')
-    const edited = withAcp.replace('enabled: false                # switch on', 'enabled: true                 # switch on').replace('concurrency: 2', 'concurrency: 5')
+    const edited = withAcp.replace('enabled: true ', 'enabled: false').replace('concurrency: 4', 'concurrency: 5')
     expect(edited).not.toBe(withAcp)
     await writeFile(file(), edited)
     expect(await migrateProviders(dir, seedDir, { fresh: false })).toEqual({ added: [], warnings: [] })
     expect(await readFile(file(), 'utf8')).toBe(edited)
-    await writeFile(file(), edited.replace(/ {2}- id: acp[\s\S]*? {4}models: \[\]\r?\n/, ''))
+    await writeFile(file(), edited.replace(/ {2}- id: acp[\s\S]*?(?= {2}- id: (?:openai|mock))/, ''))
     expect((await migrateProviders(dir, seedDir, { fresh: false })).added).toEqual([])
     expect(await readFile(file(), 'utf8')).not.toContain('id: acp')
   })
@@ -243,11 +251,34 @@ describe('seed migration', () => {
     expect(await readFile(file(), 'utf8')).not.toContain('strata')
   })
 
+  it('acp-port-8787-v1 moves only the exact old proxy address, once', async () => {
+    const mk = (url: string) => `---
+kind: providers
+providers:
+  - id: acp
+    kind: openai-compat
+    base_url: ${url} # mine
+    models: []
+---
+`
+    await writeFile(file(), mk('http://127.0.0.1:7461/v1'))
+    expect(await migrateAcpPort(dir)).toEqual({ changed: ['providers.md'], warnings: [] })
+    expect(await readFile(file(), 'utf8')).toBe(mk('http://127.0.0.1:8787/v1'))
+    expect((JSON.parse(await readFile(path.join(dir, SEED_STATE_FILE), 'utf8')) as { migrations: string[] }).migrations).toEqual(['acp-port-8787-v1'])
+    await writeFile(file(), mk('http://127.0.0.1:7461/v1'))
+    expect(await migrateAcpPort(dir)).toEqual({ changed: [], warnings: [] }) // once
+    expect(await readFile(file(), 'utf8')).toBe(mk('http://127.0.0.1:7461/v1'))
+    await rm(path.join(dir, SEED_STATE_FILE))
+    await writeFile(file(), mk('http://127.0.0.1:9999/v1'))
+    expect((await migrateAcpPort(dir)).changed).toEqual([]) // a different value is kept
+    expect(await readFile(file(), 'utf8')).toBe(mk('http://127.0.0.1:9999/v1'))
+  })
+
   it('createLlm migrates an existing config folder on start, and seeds a fresh one with acp', async () => {
     await oldFile()
     await writeFile(path.join(dir, 'roles.md'), await readFile(path.join(seedDir, 'roles.md'), 'utf8'))
     const { registry } = await createLlm({ configDir: dir, seedDir, discover: false })
-    expect(registry.providers.get('acp')).toMatchObject({ enabled: false, local: true })
+    expect(registry.providers.get('acp')).toMatchObject({ enabled: true, local: true })
     const fresh = await mkdtemp(path.join(os.tmpdir(), 'ps-mig-fresh-'))
     try {
       const { registry: r2 } = await createLlm({ configDir: path.join(fresh, 'config'), seedDir, discover: false })

@@ -144,6 +144,40 @@ export async function migrateProviders(configDir: string, seedDir: string, opts:
   return result
 }
 
+/** The id `seed-state.json` records (`migrations`) once the ACP proxy port migration has run. */
+export const ACP_PORT_MIGRATION = 'acp-port-8787-v1'
+
+/**
+ * Moves the ACP proxy to its port, once (`acp-port-8787-v1` in seed-state.json): the exact `base_url` `http://127.0.0.1:7461/v1` of the `acp`
+ * provider in providers.md becomes `http://127.0.0.1:8787/v1`; any other value, and everything else, stays. A providers.md that can't be read
+ * is left alone with a warning and the migration is not recorded.
+ */
+export async function migrateAcpPort(configDir: string): Promise<{ changed: string[]; warnings: string[] }> {
+  const result = { changed: [] as string[], warnings: [] as string[] }
+  const stateFile = path.join(configDir, SEED_STATE_FILE)
+  const state = await readStateObject(stateFile)
+  const done = Array.isArray(state.migrations) ? state.migrations.filter((m): m is string => typeof m === 'string') : []
+  if (done.includes(ACP_PORT_MIGRATION)) return result
+  const file = path.join(configDir, 'providers.md')
+  if (existsSync(file)) {
+    const mine = parseProviders(await fs.readFile(file, 'utf8'), 'providers.md')
+    if (typeof mine === 'string') {
+      result.warnings.push(`${mine}: the acp port was not changed`)
+      return result
+    }
+    const acp = mine.providers.items.find((item) => idOf(item) === 'acp')
+    const url = isMap(acp) ? acp.get('base_url', true) : undefined
+    if (isScalar(url) && url.value === 'http://127.0.0.1:7461/v1') {
+      url.value = 'http://127.0.0.1:8787/v1'
+      const front = mine.doc.toString({ lineWidth: 0 }).replace(/\n/g, mine.nl)
+      await fs.writeFile(file, mine.text.slice(0, mine.frontStart) + front + mine.text.slice(mine.frontStart + mine.front.length), 'utf8')
+      result.changed.push('providers.md')
+    }
+  }
+  await fs.writeFile(stateFile, JSON.stringify({ ...(await readStateObject(stateFile)), migrations: [...done, ACP_PORT_MIGRATION] }, null, 2) + '\n', 'utf8')
+  return result
+}
+
 /** The id `seed-state.json` records (`migrations`) once the Strata `loaded` migration has run. */
 export const STRATA_LOADED_MIGRATION = 'strata-loaded-v1'
 
