@@ -9,7 +9,7 @@ import { IPC } from '../shared/ipc'
 import type { ToolCancelRequest, ToolExecuteRequest, ToolResultPayload, ToolTurnRequest } from '../shared/ipc'
 import type { ToolDef, ToolResult, TurnToolHost } from '../shared/tools'
 import { createDefaultRegistry } from '../tools/defs'
-import { isMutatingTool } from '../tools/defs/reading'
+import { changesPicture, isMutatingTool } from '../tools/defs/reading'
 
 /** Where requests are sent: `webContents` satisfies this (`send(channel, ...args)`). */
 export interface BridgeTarget {
@@ -129,6 +129,11 @@ export class ToolBridge implements TurnToolHost {
   mutates(name: string): boolean {
     const tool = (this.registry ??= createDefaultRegistry()).get(name)
     return tool ? isMutatingTool(tool) : false
+  }
+
+  /** True when the tool writes state the document fingerprint covers (see changesPicture). Unknown tools: false. */
+  drawsPicture(name: string): boolean {
+    return changesPicture(name)
   }
 
   /** A fingerprint of the active document (hash + empty flag), or null when the editor cannot tell. Never throws. */

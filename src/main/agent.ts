@@ -43,6 +43,7 @@ export function withAutoPreview(host: ToolHost, enabled: boolean): ToolHost {
   return {
     tools: () => host.tools(),
     ...(host.mutates ? { mutates: (name: string) => host.mutates!(name) } : {}),
+    ...(host.drawsPicture ? { drawsPicture: (name: string) => host.drawsPicture!(name) } : {}),
     ...(host.fingerprint ? { fingerprint: (signal: AbortSignal) => host.fingerprint!(signal) } : {}),
     async execute(name, args, signal) {
       const result = await host.execute(name, args, signal)
@@ -82,6 +83,7 @@ export function withToolSet(host: ToolHost, toolSet: AgentToolSet | undefined): 
     tools: () => host.tools().filter((t) => !NO_FILES_TOOLS.has(t.name)),
     execute: (name, args, signal) => host.execute(name, args, signal),
     ...(host.mutates ? { mutates: (name: string) => host.mutates!(name) } : {}),
+    ...(host.drawsPicture ? { drawsPicture: (name: string) => host.drawsPicture!(name) } : {}),
     ...(host.fingerprint ? { fingerprint: (signal: AbortSignal) => host.fingerprint!(signal) } : {})
   }
 }

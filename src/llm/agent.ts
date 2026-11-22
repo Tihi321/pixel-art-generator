@@ -17,6 +17,8 @@ export interface ToolHost {
   execute(name: string, args: unknown, signal: AbortSignal): Promise<ToolResult>
   /** True when a call to this tool is meant to change the document (the end-of-run result check). Absent: the check is off. */
   mutates?(name: string): boolean
+  /** True when a call to this tool writes state the fingerprint covers (cels, layers, frames, canvas size): the repeat guard counts only steps with such a call. Absent: the guard is off. */
+  drawsPicture?(name: string): boolean
   /** A short fingerprint of the active document's content, or null when unknown. Equal at the start and the end of a run: nothing changed. Absent: the check is off. */
   fingerprint?(signal: AbortSignal): Promise<string | null>
 }
@@ -373,7 +375,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       if (opts.host.mutates?.(action.tool)) ranMutating = true
       const result = await runTool(`json_${step}_${i}`, action.tool, action.args)
       lastError = result.isError ? errorText(result) : null
-      if (!result.isError && opts.host.mutates?.(action.tool)) stepMutated = true
+      if (!result.isError && opts.host.drawsPicture?.(action.tool)) stepMutated = true
       const content = toolResultContent(result, caps.vision, maxChars)
       const head = `${label}${result.isError ? ' (error)' : ''}:`
       if (typeof content === 'string') parts.push({ type: 'text', text: `${head}\n${content}` })
@@ -383,15 +385,20 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     if (fix) parts.push({ type: 'text', text: fix })
     const text = parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
     convo.push({ role: 'user', content: parts.some((p) => p.type === 'image') ? parts : text })
-    // repeat guard: a pixel-changing step that ends on the picture of the step before, or on a picture for the third time, ends the run
-    if (!reply.done && !aborted && !signal.aborted && stepMutated && opts.host.fingerprint && opts.host.mutates && startPrint != null) {
+    // repeat guard: a step with a picture-writing tool (host.drawsPicture) that ends on the picture of the counted step before, or on a picture for the third time, ends the run
+    if (!reply.done && !aborted && !signal.aborted && stepMutated && opts.host.fingerprint && opts.host.drawsPicture && startPrint != null) {
       let now: string | null
       try {
         now = await opts.host.fingerprint(signal)
       } catch {
         now = null
       }
-      if (now != null && now !== startPrint) {
+      // an abort that landed during the read ends the run as aborted, not as completed
+      if (signal.aborted) return finish('aborted')
+      if (now === startPrint) {
+        // back on the start picture: never counted and never a stop, but the next step is not "the same as the step before"
+        lastPrint = now
+      } else if (now != null) {
         const seen = ended.get(now) ?? 0
         if (now === lastPrint || seen >= 2) {
           emit({ type: 'text', text: REPEAT_STOP_TEXT })

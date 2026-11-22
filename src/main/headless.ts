@@ -18,7 +18,7 @@ import type { runAgent } from '../llm'
 import { serializeProject } from '../core'
 import { DocumentSet } from '../tools/documents'
 import { createDefaultRegistry } from '../tools/defs'
-import { isMutatingTool } from '../tools/defs/reading'
+import { changesPicture, isMutatingTool } from '../tools/defs/reading'
 import { type ToolRegistry, createToolHost } from '../tools/registry'
 import type { TurnToolHost } from '../shared/tools'
 import type { ToolServices } from '../tools/services'
@@ -82,6 +82,7 @@ function agentBridge(host: TurnToolHost, registry: ToolRegistry): TurnToolHost {
       const t = registry.get(name)
       return t ? isMutatingTool(t) : false
     },
+    drawsPicture: (name) => changesPicture(name),
     async fingerprint(signal) {
       try {
         const r = await host.execute('canvas_fingerprint', {}, signal)

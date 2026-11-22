@@ -24,6 +24,8 @@ export interface ToolHost {
   execute(name: string, args: unknown, signal: AbortSignal): Promise<ToolResult>
   /** True when a call to this tool is meant to change the document (the agent end-of-run result check). Absent: the check is off. */
   mutates?(name: string): boolean
+  /** True when a call to this tool writes state the fingerprint covers (cels, layers, frames, canvas size): the agent's repeat guard counts only steps with such a call. Absent: the guard is off. */
+  drawsPicture?(name: string): boolean
   /** A short fingerprint of the active document's content, or null when unknown. Equal at the start and the end of a run: nothing changed. Absent: the check is off. */
   fingerprint?(signal: AbortSignal): Promise<string | null>
 }

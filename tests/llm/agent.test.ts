@@ -438,9 +438,10 @@ describe('agent loop, JSON-action fallback', () => {
             return { content: [{ type: 'text', text: 'draw ok' }] }
           }
         })
-        return { ...host, mutates: (n: string) => n === 'draw', fingerprint: async () => state.print } as ToolHost
+        // `preview` stands for a tool that changes the document outside the fingerprint (a tag, a palette, a duration)
+        return { ...host, mutates: (n: string) => n === 'draw' || n === 'preview', drawsPicture: (n: string) => n === 'draw', fingerprint: async () => state.print } as ToolHost
       }
-      const go = (mock: MockProvider, host: ToolHost) => {
+      const go =(mock: MockProvider, host: ToolHost) => {
         const events: AgentEvent[] = []
         return runAgent({ chat: mockChat(mock), ...jsonOpts, system: 's', userMessage: 'go', host, onEvent: (e) => events.push(e) }).then((r) => ({ r, events }))
       }
@@ -467,6 +468,25 @@ describe('agent loop, JSON-action fallback', () => {
       expect(c.r.reason).toBe('completed')
       expect(alt.requests).toHaveLength(5)
       expect(stopTexts(c.events)).toBe(1)
+
+      // a step whose only tool writes outside the picture (a tag, a palette) is not a drawing step: no stop, the run goes on
+      const tagged = new MockProvider('mock', { chunkDelayMs: 1 })
+      tagged.script([
+        reply({ actions: [{ tool: 'draw', args: {} }], done: false }),
+        reply({ actions: [{ tool: 'preview', args: {} }], done: false }),
+        reply({ actions: [{ tool: 'draw', args: {} }], done: false }),
+        reply({ say: 'finished', actions: [], done: true })
+      ])
+      const d = await go(tagged, seqHost(['a', 'b']))
+      expect(tagged.requests).toHaveLength(4)
+      expect(stopTexts(d.events)).toBe(0)
+
+      // a -> back to the start picture -> a is no repeat; only the third arrival on a stops
+      const back = new MockProvider('mock', { chunkDelayMs: 1 })
+      back.script(script(5))
+      const e = await go(back, seqHost(['a', 'empty', 'a', 'empty', 'a']))
+      expect(back.requests).toHaveLength(5)
+      expect(stopTexts(e.events)).toBe(1)
     })
 
     it('the error guard comes first and the two caps are independent', async () => {

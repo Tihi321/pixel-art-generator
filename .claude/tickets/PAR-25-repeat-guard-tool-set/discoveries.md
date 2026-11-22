@@ -1,0 +1,1 @@
+- 2026-11-22 implement: README.md and docs/ never describe config/app.json (selectedModel, contextSize undocumented) (README.md) - suggested: add a short config/app.json section in a later ticket
