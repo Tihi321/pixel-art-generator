@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { ZodType } from 'zod'
 import { stripThinking } from './types'
-import type { ChatFn, ChatMessage, ChatResult } from './types'
+import type { ChatFn, ChatMessage, ChatResult, Usage } from './types'
 
 export { stripThinking } from './types'
 
@@ -32,6 +32,7 @@ export interface JsonResult<T> {
  * Asks for JSON. Passes the schema to providers that support it. If the reply doesn't parse or validate,
  * asks once more with the error (a repair retry). If the provider rejects the schema, tries again without it.
  * `chat` is any model call, for example `router.chatFn({ role })`.
+ * The returned `chat.usage` and `cost` add up every attempt that answered (the schema retry and the repair attempts included).
  */
 export async function chatJson<T>(
   chat: ChatFn,
@@ -40,10 +41,12 @@ export async function chatJson<T>(
   opts: { maxTokens?: number; temperature?: number; signal?: AbortSignal } = {}
 ): Promise<JsonResult<T>> {
   let cost = 0
+  let usage: Usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }
   const jsonSchema = jsonSchemaOf(schema)
   const ask = async (msgs: ChatMessage[], withSchema: boolean): Promise<ChatResult> => {
     const r = await chat(msgs, { schema: withSchema ? jsonSchema : undefined, ...opts })
     cost += r.costUsd
+    usage = { inputTokens: usage.inputTokens + r.usage.inputTokens, cachedInputTokens: usage.cachedInputTokens + r.usage.cachedInputTokens, outputTokens: usage.outputTokens + r.usage.outputTokens }
     return r
   }
   let reply: ChatResult
@@ -62,7 +65,7 @@ export async function chatJson<T>(
     }
   }
   let parsed = tryParse(reply.text)
-  if (parsed.ok) return { value: parsed.value, chat: reply, cost }
+  if (parsed.ok) return { value: parsed.value, chat: { ...reply, usage }, cost }
   // Up to two repair retries: a long reply sometimes breaks the JSON twice in a row (seen on the ACP proxy, PAR-15).
   let last = reply
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -76,7 +79,7 @@ export async function chatJson<T>(
     ]
     last = await ask(repair, false)
     parsed = tryParse(last.text)
-    if (parsed.ok) return { value: parsed.value, chat: last, cost }
+    if (parsed.ok) return { value: parsed.value, chat: { ...last, usage }, cost }
   }
   throw new Error(`the model did not return valid JSON after two repair attempts: ${parsed.error}`)
 }

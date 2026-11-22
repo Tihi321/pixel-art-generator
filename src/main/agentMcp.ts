@@ -56,6 +56,8 @@ export interface AgentRunView {
   error?: string
   timedOut?: boolean
   stoppedBy?: 'mcp'
+  /** The repeat guard ended the run (state 'completed'): not the model's own "done". */
+  repeatStop?: true
   events: CompactEvent[]
   droppedEvents: number
 }
@@ -75,6 +77,8 @@ interface Entry {
   error?: string
   timedOut?: boolean
   stoppedBy?: 'mcp'
+  /** The repeat guard ended the run (state 'completed'): not the model's own "done". */
+  repeatStop?: true
   events: CompactEvent[]
   droppedEvents: number
 }
@@ -121,6 +125,7 @@ export class AgentRunLog {
       }
       e.endedAt = Date.now()
       e.steps = ev.steps
+      if (ev.repeatStop) e.repeatStop = true
       e.usage = ev.usage
       e.costUsd = ev.costUsd
       if (ev.model) e.model = ev.model
@@ -247,7 +252,7 @@ export const AGENT_TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'get_agent_run',
-    description: 'The state of an agent run: running or how it ended, the last events (steps, tool calls, results, errors), the reply, usage and cost. Runs are kept in memory (the last 20 of this Pixel Studio process).',
+    description: 'The state of an agent run: running or how it ended, the last events (steps, tool calls, results, errors), the reply, usage and cost. Runs are kept in memory (the last 20 of this Pixel Studio process). `repeatStop: true` with state `completed` means the repeat guard ended the run (a drawing step left a picture the run had already drawn), not the model.',
     parameters: obj({ runId: RUN_ID_PARAM }, ['runId'])
   },
   {

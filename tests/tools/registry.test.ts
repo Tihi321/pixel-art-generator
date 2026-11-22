@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { ToolRegistry, createDefaultRegistry, createMemoryToolServices, createToolHost, defineTool, resultText } from '../../src/tools'
 import { DocumentSet } from '../../src/tools/documents'
+import { PICTURE_TOOLS, isMutatingTool } from '../../src/tools/defs/reading'
 import { setup } from './helpers'
 
 const EXPECTED = [
@@ -24,6 +25,14 @@ describe('createDefaultRegistry', () => {
     expect(registry.list()).toHaveLength(72)
     expect(registry.list().map((t) => t.name).sort()).toEqual([...EXPECTED, 'canvas_fingerprint'].sort())
     expect(registry.defs().map((d) => d.name).sort()).toEqual([...EXPECTED].sort())
+  })
+
+  it('every picture tool the repeat guard counts is a registered, mutating tool', () => {
+    for (const name of PICTURE_TOOLS) {
+      const tool = registry.get(name)
+      expect(tool, name).toBeDefined()
+      expect(isMutatingTool(tool!), name).toBe(true)
+    }
   })
 
   it('canvas_fingerprint changes when pixels change and reports empty', async () => {

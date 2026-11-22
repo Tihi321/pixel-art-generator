@@ -58,7 +58,7 @@ export function isMutatingTool(tool: { name: string; readOnly: boolean; noTransa
  * references (`set_style_reference`), `load_palette` (only with remap), `remap_to_palette` (with `palette` it may change only the document palette), `make_expression_set`, `update_layer` (may change only
  * `locked`), `import_image` and `draw_sprite_from_reference` (they open another document).
  */
-const PICTURE_TOOLS = new Set([
+export const PICTURE_TOOLS: ReadonlySet<string> = new Set([
   // cels
   'draw_grid', 'set_pixels', 'draw_line', 'draw_rect', 'draw_ellipse', 'draw_polygon', 'draw_gradient', 'draw_image',
   'flood_fill', 'replace_color', 'clear_cel', 'transform_cel', 'outline', 'draw_text', 'draw_ui_element', 'draw_nine_slice',

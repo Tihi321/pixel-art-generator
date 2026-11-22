@@ -457,6 +457,7 @@ describe('agent loop, JSON-action fallback', () => {
       expect(a.r.reason).toBe('completed')
       expect(same.requests).toHaveLength(2)
       expect(stopTexts(a.events)).toBe(1)
+      expect(a.r.repeatStop).toBe(true)
 
       // a new picture each step is progress: nothing stops
       const progress = new MockProvider('mock', { chunkDelayMs: 1 })
@@ -464,6 +465,7 @@ describe('agent loop, JSON-action fallback', () => {
       const b = await go(progress, seqHost(['v1', 'v2', 'v3']))
       expect(progress.requests).toHaveLength(4)
       expect(stopTexts(b.events)).toBe(0)
+      expect(b.r.repeatStop).toBeUndefined()
 
       // alternating between two pictures: the third arrival on one of them ends the run
       const alt = new MockProvider('mock', { chunkDelayMs: 1 })
@@ -491,6 +493,19 @@ describe('agent loop, JSON-action fallback', () => {
       const e = await go(back, seqHost(['a', 'empty', 'a', 'empty', 'a']))
       expect(back.requests).toHaveLength(5)
       expect(stopTexts(e.events)).toBe(1)
+
+      // an abort that lands during the guard's fingerprint read on a repeated picture ends the run aborted, with no stop text
+      const ac = new AbortController()
+      const base = seqHost(['drawn'])
+      let reads = 0
+      const abortingHost = { ...base, fingerprint: async (s: AbortSignal) => { reads++; const p = await base.fingerprint!(s); if (reads === 3) ac.abort(); return p } } as ToolHost
+      const abortMock = new MockProvider('mock', { chunkDelayMs: 1 })
+      abortMock.script(script(3))
+      const events: AgentEvent[] = []
+      const f = await runAgent({ chat: mockChat(abortMock), ...jsonOpts, system: 's', userMessage: 'go', host: abortingHost, signal: ac.signal, onEvent: (ev) => events.push(ev) })
+      expect(f.reason).toBe('aborted')
+      expect(stopTexts(events)).toBe(0)
+      expect(f.repeatStop).toBeUndefined()
     })
 
     it('the error guard comes first and the two caps are independent', async () => {
@@ -538,10 +553,15 @@ describe('agent loop, JSON-action fallback', () => {
 
   it('takes two repair retries for broken JSON before giving up', async () => {
     const mock = new MockProvider('mock', { chunkDelayMs: 1 })
-    mock.script(['{"say": "a', '{"actions": [', reply({ say: 'ok', actions: [], done: true })])
+    mock.script([
+      { text: '{"say": "a', usage: { inputTokens: 10, outputTokens: 1 } },
+      { text: '{"actions": [', usage: { inputTokens: 20, outputTokens: 2 } },
+      { text: JSON.stringify({ say: 'ok', actions: [], done: true }), usage: { inputTokens: 30, outputTokens: 3 } }
+    ])
     const res = await runAgent({ chat: mockChat(mock), ...json, system: 's', userMessage: 'go', host: makeHost().host })
     expect(res.reason).toBe('completed')
     expect(mock.requests).toHaveLength(3)
+    expect(res.usage).toEqual({ inputTokens: 60, cachedInputTokens: 0, outputTokens: 6 })
     const bad = new MockProvider('mock', { chunkDelayMs: 1 })
     bad.script(['nope'])
     const r2 = await runAgent({ chat: mockChat(bad), ...json, system: 's', userMessage: 'go', host: makeHost().host })

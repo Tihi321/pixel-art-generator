@@ -48,6 +48,8 @@ export interface AgentResult {
   /** The whole conversation without the system message: `history`, the user message and everything this run added. Pass it as `history` next turn. */
   messages: ChatMessage[]
   steps: number
+  /** True when the repeat guard ended the run (reason 'completed'): a step left a picture the run had already drawn; the model did not say it was done. */
+  repeatStop?: true
   usage: Usage
   costUsd: number
   /** `provider/model` that answered last, when known. */
@@ -193,10 +195,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   let model: string | undefined
   let steps = 0
 
-  const finish = (reason: AgentStopReason, error?: Error): AgentResult => {
+  const finish = (reason: AgentStopReason, error?: Error, extra: { repeatStop?: true } = {}): AgentResult => {
     if (error) emit({ type: 'error', error })
     emit({ type: 'done', reason, messages: convo, steps })
-    return { reason, messages: convo, steps, usage, costUsd, model, ...(error ? { error } : {}) }
+    return { reason, messages: convo, steps, usage, costUsd, model, ...(error ? { error } : {}), ...extra }
   }
 
   // which model, and what it can do
@@ -402,7 +404,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
         const seen = ended.get(now) ?? 0
         if (now === lastPrint || seen >= 2) {
           emit({ type: 'text', text: REPEAT_STOP_TEXT })
-          return finish('completed')
+          return finish('completed', undefined, { repeatStop: true })
         }
         ended.set(now, seen + 1)
         lastPrint = now
