@@ -130,6 +130,8 @@ export function chatTitle(text: string): string {
 export class AgentRunner {
   private convo = newConversation()
   private current: { runId: string; abort: AbortController; done: Promise<void> } | null = null
+  /** The last run's chat save and `done` delivery, while they are still pending. */
+  private settling: Promise<void> | null = null
 
   constructor(private readonly opts: AgentRunnerOptions) {}
 
@@ -190,9 +192,12 @@ export class AgentRunner {
     return this.getState()
   }
 
-  /** Resolves when the current run (if any) has finished. */
+  /** Resolves when no run is going and the last run's chat save and `done` event have settled. */
   async whenIdle(): Promise<void> {
-    while (this.current) await this.current.done
+    while (this.current || this.settling) {
+      if (this.current) await this.current.done
+      else await this.settling
+    }
   }
 
   private async execute(convo: Conversation, runId: string, text: string, modelRef: string | null | undefined, abort: AbortController): Promise<void> {
@@ -281,8 +286,13 @@ export class AgentRunner {
       fail(err instanceof Error ? err.message : String(err))
     } finally {
       this.current = null
-      await this.save(convo)
-      if (done) deliver(done)
+      const settle = (async () => {
+        await this.save(convo)
+        if (done) deliver(done)
+      })()
+      this.settling = settle
+      await settle
+      if (this.settling === settle) this.settling = null
     }
   }
 

@@ -270,6 +270,26 @@ describe('chat history', () => {
       chats
     })
 
+  it('whenIdle waits for the last chat save and the done event', async () => {
+    mock.script(['all done'])
+    let open!: () => void
+    const gate = new Promise<void>((r) => (open = r))
+    let saveCalled!: () => void
+    const saving = new Promise<void>((r) => (saveCalled = r))
+    const chats = { save: async () => (saveCalled(), gate) } as unknown as ChatHistoryStore
+    const runner = make(chats)
+    runner.send({ text: 'hello' })
+    await saving
+    let idle = false
+    const waiting = runner.whenIdle().then(() => (idle = true))
+    await new Promise((r) => setTimeout(r, 30))
+    expect(idle).toBe(false)
+    expect(events.some((e) => e.type === 'done')).toBe(false)
+    open()
+    await waiting
+    expect(events.some((e) => e.type === 'done')).toBe(true)
+  })
+
   it('saves a chat after every turn, lists it, and continues it after a restart', async () => {
     mock.script([{ text: 'first answer', chunks: 4 }, 'second answer', 'third answer'])
     const runner = make(new ChatHistoryStore(dir))

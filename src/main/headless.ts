@@ -127,7 +127,13 @@ export async function startHeadless(opts: HeadlessOptions): Promise<Headless> {
   const stopAgent = async (): Promise<void> => {
     agentClosed = true
     agent?.runner.stop()
-    await agent?.runner.whenIdle()
+    // at most 10 s for the last run's chat save
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([agent?.runner.whenIdle(), new Promise((r) => (timer = setTimeout(r, 10_000)))])
+    } finally {
+      clearTimeout(timer)
+    }
   }
   const stopAll = async (): Promise<void> => {
     stopped = true
