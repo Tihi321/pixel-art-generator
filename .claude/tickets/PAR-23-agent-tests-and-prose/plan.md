@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 request: creative-hub/REQ-0030
 repos: [pixel-art-generator]
 branch: PAR-23_agent-tests-and-prose
