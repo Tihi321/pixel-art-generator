@@ -342,7 +342,16 @@ describe('chat history', () => {
   it('skips files that are not chats, and refuses to open one while a turn runs', async () => {
     await writeFile(path.join(dir, 'junk.json'), '{"x":1}', 'utf8')
     mock.script(['a', { text: 'y'.repeat(50), chunks: 50, chunkDelayMs: 10 }])
-    const runner = make(new ChatHistoryStore(dir))
+    const store = new ChatHistoryStore(dir)
+    const realLoad = store.load.bind(store)
+    let release: () => void = () => undefined
+    const loadGate = new Promise<void>((r) => (release = r))
+    let gated = false
+    store.load = async (i) => {
+      if (gated) await loadGate
+      return realLoad(i)
+    }
+    const runner = make(store)
     runner.send({ text: 'one' })
     await runner.whenIdle()
     const id = runner.getState().chatId
@@ -350,6 +359,16 @@ describe('chat history', () => {
     runner.send({ text: 'two' })
     await expect(runner.openChat(id)).rejects.toThrow(/still working/)
     await expect(runner.deleteChat(id)).rejects.toThrow(/Stop it first/)
+    runner.stop()
+    await runner.whenIdle()
+    // a run that starts while the chat is loading wins: the open is refused after the load
+    const before = runner.getState().chatId
+    gated = true
+    const opening = runner.openChat(id)
+    runner.send({ text: 'three' })
+    release()
+    await expect(opening).rejects.toThrow(/still working/)
+    expect(runner.getState().chatId).toBe(before)
     runner.stop()
     await runner.whenIdle()
   })

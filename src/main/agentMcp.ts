@@ -115,6 +115,10 @@ export class AgentRunLog {
     }
     if (ev.type === 'done') {
       e.state = ev.reason
+      if (ev.reason !== 'aborted') {
+        delete e.stoppedBy
+        delete e.timedOut
+      }
       e.endedAt = Date.now()
       e.steps = ev.steps
       e.usage = ev.usage
@@ -296,7 +300,8 @@ export function withAgentTools(host: McpHost, agent: AgentHandles, opts: { timeo
   const start = async (args: unknown): Promise<ToolResult> => {
     const p = startSchema.safeParse(args ?? {})
     if (!p.success) return fail(formatZodError('start_agent_run', p.error))
-    const { text, model, continueChat } = p.data
+    const { text, continueChat } = p.data
+    const model = p.data.model?.trim() || undefined
     if (!text.trim()) return fail('start_agent_run: text must not be empty.')
     const b = busy()
     if (b) return b

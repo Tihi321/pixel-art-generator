@@ -178,6 +178,7 @@ export class AgentRunner {
     if (!this.opts.chats) throw new Error('Chats are not saved here.')
     if (this.current) throw new Error('The agent is still working. Stop it or wait, then open the chat.')
     const chat = await this.opts.chats.load(id)
+    if (this.current) throw new Error('The agent is still working. Stop it or wait, then open the chat.')
     this.convo = { id: chat.id, title: chat.title, createdAt: chat.createdAt, history: chat.messages, events: chat.events }
     return { state: this.getState(), events: chat.events }
   }
