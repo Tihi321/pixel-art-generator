@@ -3,7 +3,6 @@ kind: roles
 # Names that stand for a provider/model, usable in the role lists below. Change one here and every role that uses it follows.
 aliases:
   local: acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs   # through the ACP proxy (HUB-38); JSON-action mode, the proxy refuses tools for local models
-  lmstudio: lmstudio/ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp   # tools and vision, for the model picker (a chat with an image)
   cloud: deepseek/deepseek-flash
   claude: anthropic/claude-sonnet-5-5
 roles:
