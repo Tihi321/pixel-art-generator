@@ -4,6 +4,7 @@ import type { MockReply } from '../../src/llm/mock'
 import { collect } from '../../src/llm/types'
 import type { ChatFn } from '../../src/llm/types'
 import { AgentRunLog, MAX_RUNS, MAX_RUN_EVENTS, type AgentHandles, type AgentLlm, createAgent, withAgentTools } from '../../src/main/agentMcp'
+import type { ChatHistoryStore } from '../../src/main/chatHistory'
 import type { McpHost } from '../../src/main/mcp'
 import type { LlmOverview } from '../../src/shared/agent'
 import type { ToolDef, ToolResult, TurnToolHost } from '../../src/shared/tools'
@@ -92,6 +93,29 @@ describe('artist agent over MCP', () => {
     const listed = parse(await host.execute('list_models', {}, sig))
     expect(listed).toMatchObject({ defaultModel: 'a/x', selectedModel: null, unavailable: 1 })
     expect(listed['models']).toEqual([{ ref: 'a/x', label: 'X', tools: false, vision: false, local: true, free: true, shown: true }])
+  })
+
+  it('a start while the last run is still saving its chat is refused, and works once the save settles', async () => {
+    const mock = new MockProvider('mock')
+    mock.script([reply({ say: 'one', actions: [], done: true }), reply({ say: 'two', actions: [], done: true })])
+    let open!: () => void
+    const gate = new Promise<void>((r) => (open = r))
+    let saveCalled!: () => void
+    const saving = new Promise<void>((r) => (saveCalled = r))
+    const chats = { save: async () => (saveCalled(), gate) } as unknown as ChatHistoryStore
+    const agent = createAgent({ bridge, llm: fakeLlm(mock), chats })
+    const host = withAgentTools(baseHost, agent)
+    const runId = parse(await host.execute('start_agent_run', { text: 'first' }, sig))['runId'] as string
+    await saving
+    expect(parse(await host.execute('get_agent_run', { runId }, sig))['state']).toBe('running')
+    const busy = await host.execute('start_agent_run', { text: 'second' }, sig)
+    expect(busy.isError).toBe(true)
+    expect(errText(busy)).toContain(runId)
+    open()
+    await agent.runner.whenIdle()
+    expect(parse(await host.execute('get_agent_run', { runId }, sig))['state']).toBe('completed')
+    expect((await host.execute('start_agent_run', { text: 'second' }, sig)).isError).toBeFalsy()
+    await agent.runner.whenIdle()
   })
 
   it('no model: an error at once and nothing runs; an unknown run id is an error', async () => {

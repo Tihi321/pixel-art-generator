@@ -1,0 +1,5 @@
+{"ts":"2026-11-22T16:10:00Z","actor":"planner","type":"plan.created","request":"REQ-0030","ticket":"PAR-23-agent-tests-and-prose","detail":"planner wrote the plan (draft)"}
+{"ts":"2026-11-22T16:10:00Z","actor":"director-scribe","type":"plan.approved","request":"REQ-0030","ticket":"PAR-23-agent-tests-and-prose","detail":"user: 'Approve as recommended'"}
+{"ts":"2026-11-22T16:20:00Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0030","ticket":"PAR-23-agent-tests-and-prose","detail":"branch PAR-23_agent-tests-and-prose from master 2e0d3fc"}
+{"ts":"2026-11-22T16:35:00Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0030","ticket":"PAR-23-agent-tests-and-prose","detail":"test 540 pass, typecheck, lint, build ok"}
+{"ts":"2026-11-22T16:36:00Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0030","ticket":"PAR-23-agent-tests-and-prose","detail":"changelog.md written"}

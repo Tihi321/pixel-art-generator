@@ -293,7 +293,7 @@ Strata serves one model per process on port 8080, chosen by the `run-*.bat` you 
 
 ## Local models with tools
 
-Tool calling works best with models that were trained for it (Qwen3 / Qwen3-Coder, Llama 3.x, Mistral, GPT-OSS, Gemma 3+). In LM Studio load the model with a context of at least 32768: the guide, the document summary and the tool list take about 8000 tokens before the conversation starts.
+Tool calling works best with models that were trained for it (Qwen3 / Qwen3-Coder, Llama 3.x, Mistral, GPT-OSS, Gemma 3+). Load the model with a context of at least 65536 (Strata has 131072): the guide, the document summary and the tool list take about 34,000 tokens before the conversation starts (34,292 measured on the first step in JSON-action mode, creative-hub HUB-41).
 
 ## Which models the chat offers
 
