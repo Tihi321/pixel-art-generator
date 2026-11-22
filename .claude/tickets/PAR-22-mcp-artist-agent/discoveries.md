@@ -1,0 +1,1 @@
+- 2026-11-22 implementer: `if (opts.turnError) throw` is duplicated in makeBridge.beginTurn, harmless (tests/main/agent.test.ts:34-35) - suggested: drop the second line

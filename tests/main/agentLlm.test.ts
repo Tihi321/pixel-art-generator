@@ -106,6 +106,15 @@ describe('LlmService', () => {
     expect(await svc.resolveModel()).toMatchObject({ vision: false, ref: 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs' }) // the local default has no vision (the tools flag is asserted in registry.test.ts)
   })
 
+  it('checkAgentModel: ok for the default, an error for an unknown ref and for a role whose only model has no key', async () => {
+    const svc = make(fakeKeys().ops)
+    expect(await svc.checkAgentModel()).toEqual({ ok: true, ref: 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs' })
+    expect(await svc.checkAgentModel('nope/x')).toMatchObject({ ok: false, error: expect.stringContaining('Model "nope/x" is not available') })
+    await writeFile(path.join(dir, 'config', 'roles.md'), '---\nkind: roles\nroles:\n  artist:\n    models: [deepseek/deepseek-flash]\n  palette:\n    models: [deepseek/deepseek-flash]\n---\n', 'utf8')
+    expect((await svc.reload()).error).toBeUndefined()
+    expect(await svc.checkAgentModel()).toMatchObject({ ok: false, error: expect.stringContaining('No model is available for the artist') })
+  })
+
   it('the context size from Settings is saved, applied to LM Studio loads and survives a restart', async () => {
     const { ops } = fakeKeys()
     const svc = make(ops)

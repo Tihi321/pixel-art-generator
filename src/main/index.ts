@@ -7,7 +7,9 @@ import { replayNotice, startMcp } from './mcpApp'
 import { type EngineLock, readLiveLock } from './engineLock'
 import { type EngineChoice, choiceFromEnv, handoverDir, openArgsFor, requestHandover, waitForPortFree } from './takeover'
 import { loadMcpSettings } from './mcpSettings'
-import { registerAgentIpc } from './agentIpc'
+import { registerAgentIpc, resolveSeedConfigDir } from './agentIpc'
+import { withAgentTools } from './agentMcp'
+import { LlmService } from './llm'
 import { AssetStore } from './assets'
 import { startAssets } from './assetsApp'
 import { type CliArgs, openDocumentArgs, parseCli } from './cli'
@@ -158,6 +160,7 @@ async function runHeadless(): Promise<void> {
     token: process.env['PIXEL_STUDIO_MCP_TOKEN']?.trim() || null,
     log: (m) => console.warn(`[mcp] ${m}`),
     lockRoot: defaultRoot(),
+    agent: { llm: new LlmService({ seedDir: resolveSeedConfigDir() }), chatsDir: join(defaultRoot(), 'chats') },
     version: app.getVersion(),
     onHandover: () => app.exit(0) // a window took the documents over
   })
@@ -203,8 +206,8 @@ if (cli.mcpOnly) {
         app.quit()
         return
       }
-      startMcp(toolBridge, { blocked: engine.blocked, port: engine.port })
-      registerAgentIpc(ipcMain, toolBridge)
+      const agent = registerAgentIpc(ipcMain, toolBridge)
+      startMcp(withAgentTools(toolBridge, agent), { blocked: engine.blocked, port: engine.port })
       startAssets()
       createWindow()
       if (engine.handed?.length) await openHandedOver(engine.handed)

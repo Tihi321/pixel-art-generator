@@ -214,7 +214,7 @@ export class AgentRunner {
       else deliver(ev)
     }
     const label = turnLabel(text)
-    send({ type: 'start', label, text })
+    send({ type: 'start', label, text, chatId: convo.id })
     const zero: AgentUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }
     const fail = (message: string): void => {
       send({ type: 'error', message })

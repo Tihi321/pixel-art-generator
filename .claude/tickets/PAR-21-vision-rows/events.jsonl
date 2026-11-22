@@ -4,3 +4,5 @@
 {"ts":"2026-11-22T13:32:33Z","actor":"implement","type":"slice.done","request":"creative-hub/REQ-0030","ticket":"PAR-21-vision-rows","detail":"seed and ROADMAP edits done"}
 {"ts":"2026-11-22T13:32:34Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0030","ticket":"PAR-21-vision-rows","detail":"B1-B4 pass; test, typecheck, lint, build ok"}
 {"ts":"2026-11-22T13:32:34Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0030","ticket":"PAR-21-vision-rows","detail":"changelog.md written"}
+{"ts":"2026-11-22T14:01:00Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0030","ticket":"PAR-21-vision-rows","detail":"standard check PASS (notes only)"}
+{"ts":"2026-11-22T14:01:00Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0030","ticket":"PAR-21-vision-rows","detail":"plan done after PASS; repo ticket closed"}
