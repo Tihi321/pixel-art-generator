@@ -29,3 +29,22 @@ Verification:
 - Not run: the window app (Electron wiring, chat view sync), a real model, the real `checkAgentModel` (tests use a fake `AgentLlm`), a packaged headless build. Live check is hub HUB-41 K1.
 
 Commit status: committed on `PAR-22_mcp-artist-agent` (see git log); not merged, not pushed.
+
+## 2026-11-22 Polish 1 (deep-checker items)
+
+1. (S2) `src/main/agentMcp.ts`: `AgentRunLog.runningId()` (an entry whose `done` is not recorded yet) and `AgentRunLog.ended(runId)` (resolves when its `done` is recorded). The busy check of `start_agent_run` (before and after the model check) is "the runner is running OR the log has a `running` entry"; the error names that run. `stop_agent_run` on a run whose loop ended but which is still saving waits for its `done` (capped at `STOP_WAIT_MS`) and returns its final state with `stopped: false`. `src/main/agent.ts` unchanged.
+2. (S1) `withAgentTools` takes `closed?: () => boolean`; once true, `start_agent_run` answers `isError` "Pixel Studio is shutting down: no new agent run." (the other three tools keep working). `src/main/headless.ts`: `stopAgent` (used by `stopAll` and the handover) sets it closed first, then `runner.stop()`, then `await runner.whenIdle()`. The window never passes it.
+3. (S4) The log stores the request `text` (entry and stored `start` event) cut to 4000 characters, `error` event messages and the `done` error cut to 2000, each with "…" when cut. Live events to the window unchanged.
+4. (S3) `tests/main/agentMcp.test.ts`: the fake bridge's `draw_grid` returns an image part; test 1 asserts the stored `tool_result` has `hasImage: true` and no `image` key.
+5. (T1) `tests/main/agentLlm.test.ts`: one test of the real `LlmService.checkAgentModel` (default ok, unknown ref, a role whose only model has no key).
+6. (N2) `README.md`: New chat in the window ends a running run (`aborted`, no `stoppedBy`), MCP runs too.
+
+Test 3 of `agentMcp.test.ts` also asserts the "shutting down" refusal (runner not running) and that a 10,000-character request is stored as 4000 characters plus "…".
+
+Behaviour changes a caller can see:
+- `start_agent_run` is refused as busy (naming the run) while the previous run has ended its loop but is still saving its chat (before its `done` event); `stop_agent_run` on such a run waits for it and returns its final state with `stopped: false`.
+- Headless: during shutdown or a handover to the window, `start_agent_run` is refused with "Pixel Studio is shutting down: no new agent run."
+
+Deviation: for the still-saving run, `stop_agent_run` waits on `runs.ended(runId)` rather than `runner.whenIdle()`: in that gap the runner's `current` is already null, so `whenIdle()` resolves at once and would not wait.
+
+Verification: `yarn test` 51 files, 537 tests pass; `yarn typecheck`, `yarn lint`, `yarn build` exit 0; `git diff PAR-21_vision-rows -- src/llm` empty. A throwaway test (deleted, not committed) with a chat store whose save is held open confirmed: busy refusal naming the run during the save, then `stop_agent_run` returned `stopped: false, state: 'completed'`. Not run: the window app, headless shutdown end to end, a real model.

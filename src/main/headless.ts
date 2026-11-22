@@ -119,11 +119,13 @@ export async function startHeadless(opts: HeadlessOptions): Promise<Headless> {
         run: opts.agent.run
       })
     : undefined
-  const host: McpHost = agent ? withAgentTools(drawingHost, agent, { timeoutMs: opts.agent?.timeoutMs }) : drawingHost
+  let agentClosed = false
+  const host: McpHost = agent ? withAgentTools(drawingHost, agent, { timeoutMs: opts.agent?.timeoutMs, closed: () => agentClosed }) : drawingHost
   const root = opts.lockRoot
   let stopped = false
-  /** A running agent turn is stopped and closed first, so the documents are written / the server stops with no turn open. */
+  /** A running agent turn is stopped and closed first, so the documents are written / the server stops with no turn open. No new run starts from here on. */
   const stopAgent = async (): Promise<void> => {
+    agentClosed = true
     agent?.runner.stop()
     await agent?.runner.whenIdle()
   }

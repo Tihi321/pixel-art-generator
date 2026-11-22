@@ -33,6 +33,9 @@ const RETURNED_EVENTS = 20
 const MAX_EVENT_TEXT = 2000
 const MAX_ARGS_JSON = 300
 const MAX_REPLY = 4000
+const MAX_RUN_TEXT = 4000
+const MAX_ERROR = 2000
+const MORE = '…'
 
 export type AgentRunState = 'running' | AgentStopReason
 export type CompactEvent = Record<string, unknown> & { type: string }
@@ -76,11 +79,12 @@ interface Entry {
   droppedEvents: number
 }
 
-const cut = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s)
+const cut = (s: string, n: number, more = ''): string => (s.length > n ? s.slice(0, n) + more : s)
 
 /** The last runs of this process (chat and MCP), fed by the runner's events. In memory only. */
 export class AgentRunLog {
   private readonly runs = new Map<string, Entry>()
+  private readonly waiters = new Map<string, Array<() => void>>()
 
   private create(runId: string, text: string, startedBy: 'mcp' | 'chat'): Entry {
     if (this.runs.size >= MAX_RUNS) {
@@ -91,7 +95,7 @@ export class AgentRunLog {
         }
       }
     }
-    const e: Entry = { runId, state: 'running', text, startedBy, startedAt: Date.now(), events: [], droppedEvents: 0 }
+    const e: Entry = { runId, state: 'running', text: cut(text, MAX_RUN_TEXT, MORE), startedBy, startedAt: Date.now(), events: [], droppedEvents: 0 }
     this.runs.set(runId, e)
     return e
   }
@@ -116,7 +120,9 @@ export class AgentRunLog {
       e.usage = ev.usage
       e.costUsd = ev.costUsd
       if (ev.model) e.model = ev.model
-      if (ev.error) e.error = ev.error
+      if (ev.error) e.error = cut(ev.error, MAX_ERROR, MORE)
+      for (const resolve of this.waiters.get(ev.runId) ?? []) resolve()
+      this.waiters.delete(ev.runId)
     } else if (ev.type === 'usage' && ev.model && !e.model) {
       e.model = ev.model
     }
@@ -145,12 +151,27 @@ export class AgentRunLog {
       default:
         c = { ...ev } as CompactEvent
         delete c['runId']
+        if (ev.type === 'start') c['text'] = e.text
+        else if (ev.type === 'error') c['message'] = cut(ev.message, MAX_ERROR, MORE)
+        else if (ev.type === 'done' && ev.error) c['error'] = e.error
     }
     e.events.push(c)
     if (e.events.length > MAX_RUN_EVENTS) {
       e.events.shift()
       e.droppedEvents++
     }
+  }
+
+  /** The run whose `done` event has not been recorded yet, if any (a run still saving its chat counts). */
+  runningId(): string | undefined {
+    for (const e of this.runs.values()) if (e.state === 'running') return e.runId
+    return undefined
+  }
+
+  /** Resolves when the run's `done` event is recorded (at once when it is unknown or has ended). */
+  ended(runId: string): Promise<void> {
+    if (this.runs.get(runId)?.state !== 'running') return Promise.resolve()
+    return new Promise((resolve) => this.waiters.set(runId, [...(this.waiters.get(runId) ?? []), resolve]))
   }
 
   markTimedOut(runId: string): void {
@@ -249,13 +270,27 @@ const fail = (message: string): ToolResult => ({ isError: true, content: [{ type
 const unknownRun = (id: string): ToolResult => fail(`Unknown run id ${id}. Runs are kept in memory for the last ${MAX_RUNS} runs of this Pixel Studio process.`)
 
 /** The host plus the four agent tools. The agent itself never sees them (its host is the bridge, not this one). */
-export function withAgentTools(host: McpHost, agent: AgentHandles, opts: { timeoutMs?: number; stopWaitMs?: number } = {}): McpHost {
+export function withAgentTools(host: McpHost, agent: AgentHandles, opts: { timeoutMs?: number; stopWaitMs?: number; closed?: () => boolean } = {}): McpHost {
   const { runner, runs, llm } = agent
   const timeoutMs = opts.timeoutMs ?? AGENT_RUN_TIMEOUT_MS
   const stopWaitMs = opts.stopWaitMs ?? STOP_WAIT_MS
+  /** A closed host (headless shutdown or handover) starts no run; a run still saving (no `done` yet) counts as busy. */
   const busy = (): ToolResult | null => {
+    if (opts.closed?.()) return fail('Pixel Studio is shutting down: no new agent run.')
     const st = runner.getState()
-    return st.running ? fail(`The agent is busy with run ${st.runId}. Wait for it with get_agent_run, or stop it with stop_agent_run.`) : null
+    const id = st.running ? st.runId : runs.runningId()
+    return id ? fail(`The agent is busy with run ${id}. Wait for it with get_agent_run, or stop it with stop_agent_run.`) : null
+  }
+  const capped = async (p: Promise<unknown>): Promise<void> => {
+    let timer: NodeJS.Timeout | undefined
+    await Promise.race([
+      p,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, stopWaitMs)
+        timer.unref()
+      })
+    ])
+    clearTimeout(timer)
   }
 
   const start = async (args: unknown): Promise<ToolResult> => {
@@ -291,18 +326,15 @@ export function withAgentTools(host: McpHost, agent: AgentHandles, opts: { timeo
     const { runId } = p.data
     const view = runs.get(runId)
     if (!view) return unknownRun(runId)
-    if (view.state !== 'running' || runner.getState().runId !== runId) return json({ stopped: false, ...view })
+    if (view.state !== 'running') return json({ stopped: false, ...view })
+    if (runner.getState().runId !== runId) {
+      // its loop has ended and it is saving its chat: this call did not stop it, wait for its `done`
+      await capped(runs.ended(runId))
+      return json({ stopped: false, ...runs.get(runId) })
+    }
     runs.markStopped(runId)
     runner.stop()
-    let timer: NodeJS.Timeout | undefined
-    await Promise.race([
-      runner.whenIdle(),
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, stopWaitMs)
-        timer.unref()
-      })
-    ])
-    clearTimeout(timer)
+    await capped(runner.whenIdle())
     return json({ stopped: true, ...runs.get(runId) })
   }
 

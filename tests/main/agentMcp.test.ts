@@ -15,6 +15,7 @@ const zero = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }
 const bridge: TurnToolHost = {
   tools: () => ['get_document', 'draw_grid'].map(def),
   async execute(name) {
+    if (name === 'draw_grid') return { content: [{ type: 'text', text: 'draw_grid ok' }, { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }] }
     return text(name === 'get_document' ? 'DOC 16x16' : `${name} ok`)
   },
   beginTurn: () => undefined,
@@ -76,7 +77,9 @@ describe('artist agent over MCP', () => {
     expect(run).toMatchObject({ state: 'completed', reply: 'Done: a red square', startedBy: 'mcp', text: 'Draw a red square' })
     const events = run['events'] as Array<Record<string, unknown>>
     expect(events.some((e) => e.type === 'tool_call' && e.name === 'draw_grid')).toBe(true)
-    expect(events.some((e) => 'image' in e)).toBe(false)
+    const drawn = events.find((e) => e.type === 'tool_result' && e.name === 'draw_grid')
+    expect(drawn).toMatchObject({ hasImage: true })
+    expect(drawn).not.toHaveProperty('image')
 
     const chatBefore = agent.runner.getState().chatId
     expect((await host.execute('start_agent_run', { text: 'again' }, sig)).isError).toBeFalsy()
@@ -123,6 +126,17 @@ describe('artist agent over MCP', () => {
     const again = await host2.execute('stop_agent_run', { runId: id2 }, sig)
     expect(again.isError).toBeFalsy()
     expect(parse(again)).toMatchObject({ stopped: false, state: 'aborted' })
+
+    const id3 = parse(await host2.execute('start_agent_run', { text: 'x'.repeat(10_000) }, sig))['runId'] as string
+    await host2.execute('stop_agent_run', { runId: id3 }, sig)
+    expect(parse(await host2.execute('get_agent_run', { runId: id3 }, sig))['text']).toBe(`${'x'.repeat(4000)}…`)
+    let closed = false
+    const host3 = withAgentTools(baseHost, agent, { closed: () => closed })
+    closed = true
+    const refused = await host3.execute('start_agent_run', { text: 'after shutdown' }, sig)
+    expect(refused.isError).toBe(true)
+    expect(errText(refused)).toContain('shutting down')
+    expect(agent.runner.getState().running).toBe(false)
 
     const log = new AgentRunLog()
     log.begin('r', 't', 'mcp')
