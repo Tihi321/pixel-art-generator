@@ -1,10 +1,16 @@
-/// <reference lib="dom" />
-import type {} from '../../src/renderer/pixelStudio'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AGENT_IPC } from '../../src/shared/agent'
 import type { AgentUiEvent } from '../../src/shared/agent'
 
 describe('the Chat view follows the conversation in main', () => {
+  const g = globalThis as { window?: unknown }
+  const hadWindow = 'window' in g
+  const previousWindow = g.window
+  afterEach(() => {
+    if (hadWindow) g.window = previousWindow
+    else delete g.window
+  })
+
   it('a run that starts in a new chat (an MCP run) resets the transcript to that chat', async () => {
     const handlers: Record<string, (payload: unknown) => void> = {}
     ;(globalThis as { window?: unknown }).window = {

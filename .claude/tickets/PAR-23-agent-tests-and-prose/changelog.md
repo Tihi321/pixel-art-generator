@@ -19,3 +19,5 @@ Verification: `yarn test` 52 files / 540 tests pass (3 new; the two runner tests
 Not run: the Pixel window with a real MCP run; a real headless stop while a chat saves.
 
 Commit status: committed on the branch (not merged, not pushed).
+
+Polish 1: tests/renderer/chatSync.test.ts no longer has the DOM lib reference or the pixelStudio type import (they widened the node typecheck). The file is now typechecked by tsconfig.web.json only (added to its include, excluded from tsconfig.node.json); the test restores globalThis.window in afterEach. Probe src/main/__probe.ts (document.title) fails yarn typecheck with TS2584; with the probe removed yarn test 540 pass, typecheck 0, lint 0.

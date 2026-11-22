@@ -24,5 +24,6 @@
     "src/mcp-stdio",
     "tests",
     "*.config.ts"
-  ]
+  ],
+  "exclude": ["tests/renderer/chatSync.test.ts"]
 }
