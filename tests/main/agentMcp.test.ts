@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MockProvider } from '../../src/llm/mock'
 import type { MockReply } from '../../src/llm/mock'
 import { collect } from '../../src/llm/types'
@@ -120,10 +120,15 @@ describe('artist agent over MCP', () => {
 
   it('no model: an error at once and nothing runs; an unknown run id is an error', async () => {
     const mock = new MockProvider('mock')
-    const { agent, host } = setup(fakeLlm(mock, { ok: false, error: 'No model is available for the artist: check config/providers.md.' }))
+    const llm = fakeLlm(mock, { ok: false, error: 'No model is available for the artist: check config/providers.md.' })
+    const { agent, host } = setup(llm)
     const r = await host.execute('start_agent_run', { text: 'draw' }, sig)
     expect(r.isError).toBe(true)
     expect(errText(r)).toContain('No model is available')
+    const spy = vi.spyOn(llm, 'checkAgentModel')
+    await host.execute('start_agent_run', { text: 'x', model: '' }, sig)
+    await host.execute('start_agent_run', { text: 'x', model: '  ' }, sig)
+    expect(spy.mock.calls).toEqual([[undefined], [undefined]])
     expect(agent.runner.getState().running).toBe(false)
     expect(mock.requests).toHaveLength(0)
     const get = await host.execute('get_agent_run', { runId: 'nope' }, sig)
@@ -171,6 +176,18 @@ describe('artist agent over MCP', () => {
       log.begin(`f${i}`, 't', 'mcp')
       log.record({ runId: `f${i}`, type: 'done', reason: 'completed', steps: 1, usage: zero, costUsd: 0 })
     }
+    const done = (id: string, reason: 'completed' | 'aborted'): void => log.record({ runId: id, type: 'done', reason, steps: 1, usage: zero, costUsd: 0 })
+    log.begin('c', 't', 'mcp')
+    log.markStopped('c')
+    log.markTimedOut('c')
+    done('c', 'completed')
+    expect(log.get('c')!.stoppedBy).toBeUndefined()
+    expect(log.get('c')!.timedOut).toBeUndefined()
+    log.begin('a', 't', 'mcp')
+    log.markStopped('a')
+    log.markTimedOut('a')
+    done('a', 'aborted')
+    expect(log.get('a')).toMatchObject({ state: 'aborted', stoppedBy: 'mcp', timedOut: true })
     expect(log.get('f0')).toBeUndefined()
     expect(log.get(`f${MAX_RUNS}`)).toBeDefined()
   })
