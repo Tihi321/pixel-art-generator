@@ -89,6 +89,30 @@ describe('AgentRunner', () => {
     expect(bridge.calls.map((c) => c.name)).toEqual(['get_document'])
   })
 
+  it('no-files tool set: the model gets no file tool and the system prompt says so; all (or absent) offers every tool', async () => {
+    const names = ['get_document', 'draw_grid', 'export_png', 'save_project']
+    const toolNames = (i: number) => (mock.requests[i]!.tools ?? []).map((t) => t.name)
+    mock.script(['ok', 'ok'])
+    const noFiles = new AgentRunner({
+      bridge: makeBridge(names),
+      guide: 'GUIDE-TEXT',
+      emit: (e) => events.push(e),
+      resolveModel: async () => ({ source: { chat: mockChat(mock), capabilities: { tools: true, vision: false } }, vision: false, toolSet: 'no-files' })
+    })
+    noFiles.send({ text: 'go' })
+    await noFiles.whenIdle()
+    expect(toolNames(0)).toContain('draw_grid')
+    expect(toolNames(0)).not.toContain('export_png')
+    expect(toolNames(0)).not.toContain('save_project')
+    expect(content(mock.requests[0]!.messages[0]!)).toContain('"agentToolSet": "no-files"')
+    bridge = makeBridge(names)
+    const all = make()
+    all.send({ text: 'go' })
+    await all.whenIdle()
+    expect(toolNames(1)).toEqual(names)
+    expect(content(mock.requests[1]!.messages[0]!)).not.toContain('agentToolSet')
+  })
+
   it('adds get_style_context when the tool exists', async () => {
     bridge = makeBridge(['get_document', 'get_style_context'])
     mock.script(['ok'])

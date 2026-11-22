@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { NO_TOOLS_REFUSAL, runAgent, toolResultContent } from '../../src/llm/agent'
+import { NO_TOOLS_REFUSAL, REPEAT_STOP_TEXT, runAgent, toolResultContent } from '../../src/llm/agent'
 import type { AgentEvent, ToolHost, ToolResult } from '../../src/llm/agent'
 import { MockProvider } from '../../src/llm/mock'
 import type { MockReply } from '../../src/llm/mock'
@@ -423,6 +423,50 @@ describe('agent loop, JSON-action fallback', () => {
       readOnly.script([reply({ actions: [{ tool: 'preview', args: {} }], done: true })])
       await run(readOnly, printHost({ print: 'empty' }, false).host)
       expect(readOnly.requests).toHaveLength(1)
+    })
+
+    it('repeat guard: ends the run when a step redraws the same picture or arrives on one for the third time', async () => {
+      const script = (n: number) => [...Array.from({ length: n }, () => reply({ actions: [{ tool: 'draw', args: {} }], done: false })), reply({ say: 'finished', actions: [], done: true })]
+      const stopTexts = (events: AgentEvent[]) => events.filter((e) => e.type === 'text' && e.text === REPEAT_STOP_TEXT).length
+      /** A host whose `draw` sets the next print of `prints` (the last one repeats). */
+      const seqHost = (prints: string[]) => {
+        const state = { print: 'empty' as string | null }
+        let i = 0
+        const { host } = makeHost({
+          draw: () => {
+            state.print = prints[Math.min(i++, prints.length - 1)]!
+            return { content: [{ type: 'text', text: 'draw ok' }] }
+          }
+        })
+        return { ...host, mutates: (n: string) => n === 'draw', fingerprint: async () => state.print } as ToolHost
+      }
+      const go = (mock: MockProvider, host: ToolHost) => {
+        const events: AgentEvent[] = []
+        return runAgent({ chat: mockChat(mock), ...jsonOpts, system: 's', userMessage: 'go', host, onEvent: (e) => events.push(e) }).then((r) => ({ r, events }))
+      }
+
+      // the same picture twice in a row: the run ends at step 2
+      const same = new MockProvider('mock', { chunkDelayMs: 1 })
+      same.script(script(3))
+      const a = await go(same, seqHost(['drawn']))
+      expect(a.r.reason).toBe('completed')
+      expect(same.requests).toHaveLength(2)
+      expect(stopTexts(a.events)).toBe(1)
+
+      // a new picture each step is progress: nothing stops
+      const progress = new MockProvider('mock', { chunkDelayMs: 1 })
+      progress.script(script(3))
+      const b = await go(progress, seqHost(['v1', 'v2', 'v3']))
+      expect(progress.requests).toHaveLength(4)
+      expect(stopTexts(b.events)).toBe(0)
+
+      // alternating between two pictures: the third arrival on one of them ends the run
+      const alt = new MockProvider('mock', { chunkDelayMs: 1 })
+      alt.script(script(6))
+      const c = await go(alt, seqHost(['a', 'b', 'a', 'b', 'a']))
+      expect(c.r.reason).toBe('completed')
+      expect(alt.requests).toHaveLength(5)
+      expect(stopTexts(c.events)).toBe(1)
     })
 
     it('the error guard comes first and the two caps are independent', async () => {

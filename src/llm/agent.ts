@@ -99,6 +99,9 @@ export const MAX_ERROR_NUDGES = 2
 /** How often one run may send the model back because its actions ran but the document is unchanged (or still empty). */
 export const MAX_RESULT_NUDGES = 2
 
+/** Said when a run ends because a step left a picture the run had already drawn (a redraw loop, creative-hub HUB-43 K3). */
+export const REPEAT_STOP_TEXT = 'Stopped: this step left a picture the run had already drawn, so the drawing is kept as it is.'
+
 /** Describes the tools and the reply format for models without native tool calling. */
 export function jsonModeInstructions(tools: ToolDef[]): string {
   const list = tools.map((t) => `- ${t.name}: ${t.description}\n  args (JSON schema): ${JSON.stringify(t.parameters)}`).join('\n')
@@ -168,7 +171,8 @@ function flattenToolMessages(messages: ChatMessage[]): ChatMessage[] {
  * Runs one agent turn: the model answers, calls tools through `host`, gets the results, and repeats until it stops
  * calling tools (native mode) or says it is done (JSON-action mode), `maxSteps` model calls were made, or `signal` aborts.
  * Never throws: failures end the run with `reason: 'error'` (and an `error` event). A tool that throws or reports an
- * error gives the model an error result, and the run goes on.
+ * error gives the model an error result, and the run goes on. In JSON-action mode a run also ends `completed` when a step leaves
+ * the picture exactly as the step before it, or ends on one picture for the third time (a redraw loop).
  */
 export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   const maxSteps = opts.maxSteps ?? 25
@@ -314,6 +318,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   let resultNudges = 0
   /** The document fingerprint at the start of the run (null/undefined: unknown, the result check is off). */
   let startPrint: string | null | undefined
+  /** The fingerprint a pixel-changing step last ended on. */
+  let lastPrint: string | undefined
+  /** For each fingerprint other than startPrint: how many pixel-changing steps have ended on it. */
+  const ended = new Map<string, number>()
   if (opts.host.fingerprint && opts.host.mutates) {
     try {
       startPrint = await opts.host.fingerprint(signal)
@@ -353,6 +361,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     }
     const parts: ContentPart[] = [{ type: 'text', text: 'Results of your actions:' }]
     let aborted = false
+    let stepMutated = false
     for (const [i, action] of reply.actions.entries()) {
       const label = `#${i + 1} ${action.tool}`
       if (aborted || signal.aborted) {
@@ -364,6 +373,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       if (opts.host.mutates?.(action.tool)) ranMutating = true
       const result = await runTool(`json_${step}_${i}`, action.tool, action.args)
       lastError = result.isError ? errorText(result) : null
+      if (!result.isError && opts.host.mutates?.(action.tool)) stepMutated = true
       const content = toolResultContent(result, caps.vision, maxChars)
       const head = `${label}${result.isError ? ' (error)' : ''}:`
       if (typeof content === 'string') parts.push({ type: 'text', text: `${head}\n${content}` })
@@ -373,6 +383,24 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     if (fix) parts.push({ type: 'text', text: fix })
     const text = parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
     convo.push({ role: 'user', content: parts.some((p) => p.type === 'image') ? parts : text })
+    // repeat guard: a pixel-changing step that ends on the picture of the step before, or on a picture for the third time, ends the run
+    if (!reply.done && !aborted && !signal.aborted && stepMutated && opts.host.fingerprint && opts.host.mutates && startPrint != null) {
+      let now: string | null
+      try {
+        now = await opts.host.fingerprint(signal)
+      } catch {
+        now = null
+      }
+      if (now != null && now !== startPrint) {
+        const seen = ended.get(now) ?? 0
+        if (now === lastPrint || seen >= 2) {
+          emit({ type: 'text', text: REPEAT_STOP_TEXT })
+          return finish('completed')
+        }
+        ended.set(now, seen + 1)
+        lastPrint = now
+      }
+    }
     if (aborted || signal.aborted) return finish('aborted')
     if (reply.done && !fix) return finish('completed')
   }

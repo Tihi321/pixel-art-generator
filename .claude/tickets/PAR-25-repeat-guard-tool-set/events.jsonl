@@ -1,0 +1,4 @@
+{"ts":"2026-11-22T21:10:00Z","actor":"planner","type":"plan.created","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"planner wrote the plan (draft)"}
+{"ts":"2026-11-22T21:20:00Z","actor":"director","type":"plan.approved","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"user: 'Yes, approve all' to 'Do you approve the seven plans with these defaults'; written by the director because the scribe could not see the user's message"}
+{"ts":"2026-11-22T21:22:50Z","actor":"implement","type":"implement.started","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"Part A only (A1-A3) on PAR-25_repeat-guard-tool-set from master 5778801"}
+{"ts":"2026-11-22T21:23:30Z","actor":"implement","type":"slice.started","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"one implementer for Part A","data":{"tasks":["A1","A2","A3"]}}

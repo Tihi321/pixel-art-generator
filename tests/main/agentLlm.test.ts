@@ -217,15 +217,19 @@ describe('appSettings', () => {
   it('reads defaults from a missing or broken file', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ps-app-'))
     try {
-      expect(await readAppSettings(dir)).toEqual({ selectedModel: null, contextSize: null })
+      expect(await readAppSettings(dir)).toEqual({ selectedModel: null, contextSize: null, agentToolSet: 'all' })
       await writeAppSettings(dir, { selectedModel: 'a/b' })
       expect((await readAppSettings(dir)).selectedModel).toBe('a/b')
       await writeAppSettings(dir, { contextSize: 65536 })
-      expect(await readAppSettings(dir)).toEqual({ selectedModel: 'a/b', contextSize: 65536 })
+      expect(await readAppSettings(dir)).toEqual({ selectedModel: 'a/b', contextSize: 65536, agentToolSet: 'all' })
       await writeFile(path.join(dir, 'app.json'), JSON.stringify({ contextSize: 100 }), 'utf8')
       expect((await readAppSettings(dir)).contextSize).toBeNull()
       await writeFile(path.join(dir, 'app.json'), '{not json', 'utf8')
-      expect(await readAppSettings(dir)).toEqual({ selectedModel: null, contextSize: null })
+      expect(await readAppSettings(dir)).toEqual({ selectedModel: null, contextSize: null, agentToolSet: 'all' })
+      await writeFile(path.join(dir, 'app.json'), JSON.stringify({ agentToolSet: 'no-files' }), 'utf8')
+      expect((await readAppSettings(dir)).agentToolSet).toBe('no-files')
+      await writeFile(path.join(dir, 'app.json'), JSON.stringify({ agentToolSet: 'x' }), 'utf8')
+      expect((await readAppSettings(dir)).agentToolSet).toBe('all')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

@@ -24,6 +24,7 @@ import {
 } from '../llm'
 import type { KeyStatus, LlmAddModel, LlmCatalog, LlmCustomProviderForm, LlmCustomProviderTest, LlmCustomProviderTestResult, LlmModelInfo, LlmOverview, LlmProviderInfo } from '../shared/agent'
 import { CONTEXT_SIZE_MAX, CONTEXT_SIZE_MIN, readAppSettings, writeAppSettings } from './appSettings'
+import type { AgentToolSet } from './appSettings'
 import { defaultRoot } from './services'
 
 /** The role the chat agent uses in roles.md. */
@@ -67,6 +68,8 @@ export interface ResolvedModel {
   vision: boolean
   /** `provider/model` that will answer first, when known. */
   ref?: string
+  /** Which tools the agent gets (`agentToolSet` in config/app.json). */
+  toolSet?: AgentToolSet
 }
 
 interface Loaded {
@@ -399,9 +402,10 @@ export class LlmService {
   /** The model source for a run: `modelRef`, else the saved selection, else the role's list. */
   async resolveModel(modelRef?: string | null): Promise<ResolvedModel> {
     const { router } = await this.get()
-    const ref = modelRef ?? (await this.selectedModel())
+    const settings = await readAppSettings(this.configDir)
+    const ref = modelRef ?? settings.selectedModel
     const primary = router.candidates(AGENT_ROLE, { agentModel: ref })[0]
-    return { source: { router, role: AGENT_ROLE, modelRef: ref }, vision: !!primary?.vision, ref: primary?.ref }
+    return { source: { router, role: AGENT_ROLE, modelRef: ref }, vision: !!primary?.vision, ref: primary?.ref, toolSet: settings.agentToolSet }
   }
 
   /** Whether a run for the artist role has a model now (MCP checks this before it starts a run): `modelRef`, else the saved selection, else the role's list. */
