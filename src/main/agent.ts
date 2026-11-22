@@ -12,6 +12,7 @@ import { runAgent } from '../llm'
 import type { AgentEvent, AgentModelSource, AgentResult, ChatMessage, ToolHost as LlmToolHost, ToolResult as LlmToolResult } from '../llm'
 import { AGENT_TURN_LABEL_PREFIX, type AgentSendResponse, type AgentState, type AgentUiEvent, type AgentUsage, type ChatSummary, type OpenedChat } from '../shared/agent'
 import type { ToolHost, ToolResult, TurnToolHost } from '../shared/tools'
+import type { AgentToolSet } from './appSettings'
 import type { ChatHistoryStore } from './chatHistory'
 
 export const MAX_AGENT_STEPS = 25
@@ -42,6 +43,7 @@ export function withAutoPreview(host: ToolHost, enabled: boolean): ToolHost {
   return {
     tools: () => host.tools(),
     ...(host.mutates ? { mutates: (name: string) => host.mutates!(name) } : {}),
+    ...(host.drawsPicture ? { drawsPicture: (name: string) => host.drawsPicture!(name) } : {}),
     ...(host.fingerprint ? { fingerprint: (signal: AbortSignal) => host.fingerprint!(signal) } : {}),
     async execute(name, args, signal) {
       const result = await host.execute(name, args, signal)
@@ -57,6 +59,32 @@ export function withAutoPreview(host: ToolHost, enabled: boolean): ToolHost {
         return result
       }
     }
+  }
+}
+
+/** The 10 tools that open, save, import or export files; the `no-files` tool set leaves them out. */
+export const NO_FILES_TOOLS: ReadonlySet<string> = new Set([
+  'open_project',
+  'save_project',
+  'export_png',
+  'export_spritesheet',
+  'export_gif',
+  'import_image',
+  'export_many',
+  'export_expression_set',
+  'open_document',
+  'save_document'
+])
+
+/** The host for a tool set: `all` (or absent) returns it unchanged; `no-files` hides NO_FILES_TOOLS from `tools()`. */
+export function withToolSet(host: ToolHost, toolSet: AgentToolSet | undefined): ToolHost {
+  if (toolSet !== 'no-files') return host
+  return {
+    tools: () => host.tools().filter((t) => !NO_FILES_TOOLS.has(t.name)),
+    execute: (name, args, signal) => host.execute(name, args, signal),
+    ...(host.mutates ? { mutates: (name: string) => host.mutates!(name) } : {}),
+    ...(host.drawsPicture ? { drawsPicture: (name: string) => host.drawsPicture!(name) } : {}),
+    ...(host.fingerprint ? { fingerprint: (signal: AbortSignal) => host.fingerprint!(signal) } : {})
   }
 }
 
@@ -92,6 +120,8 @@ function summarize(result: ToolResult | LlmToolResult): { summary: string; image
 export interface ResolvedAgentModel {
   source: AgentModelSource
   vision: boolean
+  /** Absent: `all`. */
+  toolSet?: AgentToolSet
 }
 
 export interface AgentRunnerOptions {
@@ -235,7 +265,7 @@ export class AgentRunner {
       } catch (err) {
         return fail(`Could not set up the language models: ${err instanceof Error ? err.message : String(err)}`)
       }
-      const { system, styleImages } = await this.buildSystem(abort.signal)
+      const { system, styleImages } = await this.buildSystem(abort.signal, model.toolSet)
       if (abort.signal.aborted) {
         send({ type: 'done', reason: 'aborted', steps: 0, usage: zero, costUsd: 0 })
         return
@@ -247,7 +277,7 @@ export class AgentRunner {
         return fail(err instanceof Error ? err.message : String(err))
       }
 
-      const host: LlmToolHost = withAutoPreview(bridge, model.vision)
+      const host: LlmToolHost = withAutoPreview(withToolSet(bridge, model.toolSet), model.vision)
       const result: AgentResult = await (this.opts.run ?? runAgent)({
         ...model.source,
         system,
@@ -332,7 +362,7 @@ export class AgentRunner {
   }
 
   /** GUIDE + the current document (get_document) + style context (get_style_context, when references exist). */
-  private async buildSystem(signal: AbortSignal): Promise<{ system: string; styleImages: ImagePart[] }> {
+  private async buildSystem(signal: AbortSignal, toolSet?: AgentToolSet): Promise<{ system: string; styleImages: ImagePart[] }> {
     const { bridge, guide } = this.opts
     const parts = [guide]
     const call = async (name: string): Promise<ToolResult | null> => {
@@ -355,6 +385,11 @@ export class AgentRunner {
         parts.push(`## Style context\n\n${styleText}`)
         styleImages = style.content.filter((c): c is ImagePart => c.type === 'image').slice(0, 4)
       }
+    }
+    if (toolSet === 'no-files') {
+      parts.push(
+        `## Tools in this chat\n\nThe file tools are off in this Pixel Studio (config/app.json: "agentToolSet": "no-files"): ${[...NO_FILES_TOOLS].join(', ')}. Where the guide above names one of them, skip that step: draw in the open document; the user opens, saves and exports files.`
+      )
     }
     return { system: parts.join('\n\n'), styleImages }
   }

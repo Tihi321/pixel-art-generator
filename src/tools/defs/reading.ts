@@ -51,6 +51,28 @@ export function isMutatingTool(tool: { name: string; readOnly: boolean; noTransa
   return MUTATING_READONLY.has(tool.name) || (!tool.readOnly && !tool.noTransaction)
 }
 
+/**
+ * Tools that write state the document fingerprint covers (cels, layers, frames, canvas size). The agent's repeat guard counts a
+ * step only when one of its successful tools is in this set. A tool whose effect on that state is unclear, absent or only
+ * sometimes present is NOT in it (the guard must rather miss a loop than stop a real run): palette tools, tags, frame durations,
+ * references (`set_style_reference`), `load_palette` (only with remap), `remap_to_palette` (with `palette` it may change only the document palette), `make_expression_set`, `update_layer` (may change only
+ * `locked`), `import_image` and `draw_sprite_from_reference` (they open another document).
+ */
+const PICTURE_TOOLS = new Set([
+  // cels
+  'draw_grid', 'set_pixels', 'draw_line', 'draw_rect', 'draw_ellipse', 'draw_polygon', 'draw_gradient', 'draw_image',
+  'flood_fill', 'replace_color', 'clear_cel', 'transform_cel', 'outline', 'draw_text', 'draw_ui_element', 'draw_nine_slice',
+  'place_asset', 'copy_cel',
+  // canvas size, frames, layers
+  'resize_canvas', 'add_frame', 'duplicate_frame', 'delete_frame', 'move_frame',
+  'add_layer', 'delete_layer', 'move_layer', 'duplicate_layer', 'merge_down'
+])
+
+/** True when a call to this tool changes the picture the document fingerprint covers (see PICTURE_TOOLS). Unknown tools: false. */
+export function changesPicture(toolName: string): boolean {
+  return PICTURE_TOOLS.has(toolName)
+}
+
 export const readingTools = [
   defineTool({
     name: 'canvas_fingerprint',
