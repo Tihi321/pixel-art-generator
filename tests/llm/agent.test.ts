@@ -10,6 +10,7 @@ import { ModelRegistry } from '../../src/llm/registry'
 import { ModelRouter } from '../../src/llm/router'
 import { collect } from '../../src/llm/types'
 import type { ChatFn, ChatMessage, ChatResult, ToolDef } from '../../src/llm/types'
+import { changesPicture } from '../../src/tools/defs/reading'
 
 const toolDefs: ToolDef[] = [
   { name: 'draw', description: 'Draws', parameters: { type: 'object', properties: { n: { type: 'number' } } } },
@@ -426,6 +427,9 @@ describe('agent loop, JSON-action fallback', () => {
     })
 
     it('repeat guard: ends the run when a step redraws the same picture or arrives on one for the third time', async () => {
+      // the set behind the guard: a tool that may leave every cel alone (palette only) does not count
+      expect(changesPicture('draw_grid')).toBe(true)
+      expect(changesPicture('remap_to_palette')).toBe(false)
       const script = (n: number) => [...Array.from({ length: n }, () => reply({ actions: [{ tool: 'draw', args: {} }], done: false })), reply({ say: 'finished', actions: [], done: true })]
       const stopTexts = (events: AgentEvent[]) => events.filter((e) => e.type === 'text' && e.text === REPEAT_STOP_TEXT).length
       /** A host whose `draw` sets the next print of `prints` (the last one repeats). */

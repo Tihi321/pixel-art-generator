@@ -73,3 +73,11 @@ Does not count: `set_palette`, `add_colors`, `remove_colors`, `load_palette` (ce
 ### Results
 
 `yarn test`: 52 files, 542 tests passed (no new `it`: two scenarios added to the existing guard `it`). `yarn typecheck`: exit 0. `yarn lint`: exit 0.
+
+## Polish 2
+
+User words: "fix this small issue on pixel note". `remap_to_palette` removed from `PICTURE_TOOLS` in `src/tools/defs/reading.ts`: with a `palette` argument it may change only the document palette and leave every cel as it is, so a step made of it alone could end on the same fingerprint and the guard would stop a real run. Rule of the set: a tool whose effect on fingerprinted state is not certain does not count. It is now in the "not in it" comment list. The classification above is superseded for this one tool.
+
+Test: no new `it`. `changesPicture('draw_grid')` true and `changesPicture('remap_to_palette')` false added at the start of the existing guard `it` in `tests/llm/agent.test.ts` (no test touched `changesPicture` directly).
+
+Failing first on 3685e83 (fix not yet applied): `AssertionError: expected true to be false // Object.is equality` (tests/llm/agent.test.ts, the `remap_to_palette` expectation).
