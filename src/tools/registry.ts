@@ -273,6 +273,7 @@ export function createToolHost(
   opts: ToolHostOptions = {}
 ): TurnToolHost {
   let queue: Promise<unknown> = Promise.resolve()
+  const turnSessions: EditorSession[] = []
   const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
     const next = queue.then(fn, fn)
     queue = next.catch(() => undefined)
@@ -284,12 +285,16 @@ export function createToolHost(
       return enqueue(() => registry.execute(name, args, { ...ctxFactory(), signal }))
     },
     beginTurn(label) {
-      ctxFactory().session.beginTurn(label ?? opts.turnLabel ?? 'Agent turn')
+      const s = ctxFactory().session
+      s.beginTurn(label ?? opts.turnLabel ?? 'Agent turn')
+      turnSessions.push(s)
     },
     endTurn(o) {
       // Wait for queued tool calls so the turn is merged after the last one finished.
       return enqueue(() => {
-        ctxFactory().session.endTurn(o)
+        // the session the turn began on (the current document may have changed since)
+        const s = turnSessions.pop() ?? ctxFactory().session
+        s.endTurn(o)
       })
     }
   }

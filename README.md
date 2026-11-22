@@ -45,6 +45,10 @@ Whichever engine serves MCP writes `engine.lock` (JSON: pid, mode, port, url, st
 
 Set `PIXEL_STUDIO_MCP_PORT` for the port and `PIXEL_STUDIO_MCP_TOKEN` for a bearer token. Files go where the call says (absolute paths, parent folders are created); relative file names go to `~/PixelStudio/exports` (or `projects` for `.pxs`).
 
+### The artist agent over MCP
+
+Four tools start, follow and stop the built-in chat agent (role `artist`), in the window and in headless mode: `start_agent_run {text, model?, continueChat?}` returns a run id at once; `get_agent_run {runId}` gives the state (`running`, `completed`, `max_steps`, `aborted`, `error`), the last 20 events, the reply, usage and cost; `stop_agent_run {runId}` stops a run, waits for it to end (at most 10 seconds) and returns its final state with `stopped: true` (a run that had already ended comes back with `stopped: false`); `list_models` lists the models the agent can use (`tools: false` ones run in JSON-action mode). Each `start_agent_run` begins a new conversation unless `continueChat: true`, which continues the current one as the chat panel does. One run at a time, shared with the chat panel. In the window an MCP run shows in the chat: a new conversation clears the chat view first, and the conversation that was on screen stays saved in the chat history (nothing is lost, the text you were typing stays); what you type next continues the MCP run's conversation. `stop_agent_run` also stops a run started from the chat panel, and the window's Stop button also stops an MCP run. A run started over MCP is stopped after 30 minutes; a stopped run keeps what it drew as one undo step. Runs are kept in memory, the last 20. The agent works on the current document; while it runs, do not draw on that document or switch documents (other calls join the run's undo step). The tools are not in `docs/llm-guide.md`, which is the agent's own prompt.
+
 ### Tools added for VN Studio
 
 | Tool | What it does |

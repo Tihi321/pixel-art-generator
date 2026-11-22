@@ -5,6 +5,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { decodePng, encodePng, packRgba } from '../../src/core'
+import { MockProvider } from '../../src/llm/mock'
+import type { MockReply } from '../../src/llm/mock'
+import { collect } from '../../src/llm/types'
+import type { ChatFn } from '../../src/llm/types'
+import type { AgentLlm } from '../../src/main/agentMcp'
+import type { LlmOverview } from '../../src/shared/agent'
 import { openDocumentArgs, parseCli } from '../../src/main/cli'
 import { startHeadless } from '../../src/main/headless'
 import { createNodeServices } from '../../src/main/services'
@@ -53,6 +59,48 @@ describe('headless MCP', () => {
       expect(JSON.stringify(r.content)).toContain('small')
       const list = await call('list_documents', {})
       expect((list['documents'] as unknown[]).length).toBe(2)
+    } finally {
+      await client.close().catch(() => undefined)
+      await h.stop()
+    }
+  })
+
+  it('serves the agent tools, and a JSON-action run draws into the document and leaves one undo step', async () => {
+    const mock = new MockProvider('mock')
+    const json = (o: object): MockReply => ({ text: JSON.stringify(o), chunkDelayMs: 1 })
+    mock.script([
+      json({ say: 'Drawing', actions: [{ tool: 'draw_grid', args: { rows: ['rr', 'rr'], legend: { r: '#ff0000' } } }], done: false }),
+      json({ say: 'Done', actions: [], done: true })
+    ])
+    const chat: ChatFn = async (messages, o = {}) => ({ ...(await collect(mock.chat({ model: 'mock', messages, tools: o.tools, toolChoice: o.toolChoice, schema: o.schema, signal: o.signal }), o.onDelta)), costUsd: 0 })
+    const llm: AgentLlm = {
+      resolveModel: async () => ({ source: { chat, capabilities: { tools: false, vision: false } }, vision: false, ref: 'mock/m' }),
+      checkAgentModel: async () => ({ ok: true, ref: 'mock/m' }),
+      overview: async () => ({ models: [], defaultModel: null, selectedModel: null }) as unknown as LlmOverview
+    }
+    const h = await startHeadless({ port: 0, services: createNodeServices(join(root, 'agent')), agent: { llm } })
+    const client = new Client({ name: 'test', version: '1.0.0' })
+    await client.connect(new StreamableHTTPClientTransport(new URL(h.url!)))
+    try {
+      const names = (await client.listTools()).tools.map((t) => t.name)
+      for (const n of ['start_agent_run', 'get_agent_run', 'stop_agent_run', 'list_models']) expect(names).toContain(n)
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = await client.callTool({ name, arguments: args })
+        expect(r.isError, JSON.stringify(r.content)).toBeFalsy()
+        const content = r.content as Array<{ type: string; text: string }>
+        return content[content.length - 1]!.text
+      }
+      await call('new_document', { width: 4, height: 4 })
+      const { runId } = JSON.parse(await call('start_agent_run', { text: 'draw a red square' })) as { runId: string }
+      let state = 'running'
+      for (let i = 0; i < 100 && state === 'running'; i++) {
+        state = (JSON.parse(await call('get_agent_run', { runId })) as { state: string }).state
+        if (state === 'running') await new Promise((r) => setTimeout(r, 50))
+      }
+      expect(state).toBe('completed')
+      expect(await call('read_grid', {})).toContain('"00..","00.."')
+      await call('undo', {})
+      expect(await call('read_grid', {})).toContain('"empty":true')
     } finally {
       await client.close().catch(() => undefined)
       await h.stop()

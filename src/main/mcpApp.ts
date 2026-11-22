@@ -6,7 +6,7 @@ import { IPC } from '../shared/ipc'
 import type { McpStatus } from '../shared/mcp'
 import { acquireLock, releaseLock } from './engineLock'
 import { defaultRoot } from './services'
-import type { ToolBridge } from './toolBridge'
+import type { McpHost } from './mcp'
 import { type McpController, registerMcp } from './mcpSettings'
 
 /** Absolute path of the stdio shim (the build output next to the app; no asar, see electron-builder.yml). */
@@ -30,7 +30,7 @@ export function replayNotice(win: BrowserWindow): void {
  * Starts the MCP server. `blocked` keeps it off this run (another engine serves MCP: see index.ts); `port` forces the port for this run (take-over). While it runs
  * this process owns engine.lock; a bind failure (or the blocked note) also goes to the status bar.
  */
-export function startMcp(bridge: ToolBridge, opts: { blocked?: string; port?: number } = {}): McpController {
+export function startMcp(host: McpHost, opts: { blocked?: string; port?: number } = {}): McpController {
   let lockedUrl: string | null = null
   let lastError: string | undefined
   const syncStatus = (st: McpStatus): void => {
@@ -48,7 +48,7 @@ export function startMcp(bridge: ToolBridge, opts: { blocked?: string; port?: nu
       if (st.error) notice(`MCP is off: ${st.error}`)
     }
   }
-  const controller = registerMcp(ipcMain, bridge, {
+  const controller = registerMcp(ipcMain, host, {
     shimPath: shimPath(),
     blocked: opts.blocked,
     port: opts.port,

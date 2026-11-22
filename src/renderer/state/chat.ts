@@ -182,7 +182,9 @@ export function initChat(): void {
   agentApi.onEvent((ev) => {
     if (ev.type === 'start') startDepth = session.history.undoDepth
     useChat.setState((s) => {
-      const next = applyEvent(s, ev)
+      // a run in another conversation (an MCP run began a new one): the view starts that conversation first
+      const base = ev.type === 'start' && ev.chatId && ev.chatId !== s.chatId ? { ...s, ...resetChat(), turn: null, chatId: ev.chatId } : s
+      const next = applyEvent(base, ev)
       if (ev.type === 'done' && ev.runId === s.runId) return { ...next, turn: { startDepth, endDepth: session.history.undoDepth } }
       if (ev.type === 'start') return { ...next, turn: null }
       return next

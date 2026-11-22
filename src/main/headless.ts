@@ -12,10 +12,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { type EngineLock, acquireLock, describeHolder, readLiveLock, releaseLock } from './engineLock'
 import { McpHttpServer, type McpHost } from './mcp'
 import { type NodeServices, createNodeServices } from './services'
+import { type AgentHandles, type AgentLlm, createAgent, withAgentTools } from './agentMcp'
+import { ChatHistoryStore } from './chatHistory'
+import type { runAgent } from '../llm'
 import { serializeProject } from '../core'
 import { DocumentSet } from '../tools/documents'
 import { createDefaultRegistry } from '../tools/defs'
-import { createToolHost } from '../tools/registry'
+import { isMutatingTool } from '../tools/defs/reading'
+import { type ToolRegistry, createToolHost } from '../tools/registry'
+import type { TurnToolHost } from '../shared/tools'
 import type { ToolServices } from '../tools/services'
 
 export interface HeadlessOptions {
@@ -33,6 +38,8 @@ export interface HeadlessOptions {
   version?: string
   /** Called after a window took the documents over and this server stopped: the process should exit. */
   onHandover?: () => void
+  /** The artist agent and its MCP tools; absent: drawing tools only, as before. */
+  agent?: { llm: AgentLlm; chatsDir?: string; run?: typeof runAgent; timeoutMs?: number }
 }
 
 /** One document of the handover answer: `file` is a .pxs with the content, `path` the project path it came from. */
@@ -48,7 +55,9 @@ export interface HandoverDocument {
 export interface Headless {
   server: McpHttpServer
   documents: DocumentSet
+  /** The host the server uses (the agent tools included when `agent` is set). */
   host: McpHost
+  agent?: AgentHandles
   /** The URL the server listens on, or null when it could not bind (see `error`). */
   url: string | null
   error?: string
@@ -56,10 +65,33 @@ export interface Headless {
 }
 
 /** The tool host of headless mode: every call runs on the DocumentSet's current document. */
-export function createHeadlessHost(services: ToolServices, documents: DocumentSet = new DocumentSet()): { host: McpHost; documents: DocumentSet } {
+export function createHeadlessHost(services: ToolServices, documents: DocumentSet = new DocumentSet()): { host: TurnToolHost; documents: DocumentSet; registry: ToolRegistry } {
   const registry = createDefaultRegistry()
   const host = createToolHost(registry, () => ({ session: documents.session, services, documents }))
-  return { host, documents }
+  return { host, documents, registry }
+}
+
+/** The headless host as the agent's bridge: the same `mutates` / `fingerprint` as the window's ToolBridge (the result check). */
+function agentBridge(host: TurnToolHost, registry: ToolRegistry): TurnToolHost {
+  return {
+    tools: () => host.tools(),
+    execute: (name, args, signal) => host.execute(name, args, signal),
+    beginTurn: (label) => host.beginTurn(label),
+    endTurn: (o) => host.endTurn(o),
+    mutates: (name) => {
+      const t = registry.get(name)
+      return t ? isMutatingTool(t) : false
+    },
+    async fingerprint(signal) {
+      try {
+        const r = await host.execute('canvas_fingerprint', {}, signal)
+        const first = r.content[0]
+        return !r.isError && first?.type === 'text' ? first.text : null
+      } catch {
+        return null
+      }
+    }
+  }
 }
 
 /** Writes every document (not the untouched blank one) as a .pxs under `dir`, in list order. */
@@ -78,16 +110,32 @@ export async function writeHandover(documents: DocumentSet, dir: string): Promis
 
 export async function startHeadless(opts: HeadlessOptions): Promise<Headless> {
   const services = opts.services ?? createNodeServices()
-  const { host, documents } = createHeadlessHost(services)
+  const { host: drawingHost, documents, registry } = createHeadlessHost(services)
+  const agent = opts.agent
+    ? createAgent({
+        bridge: agentBridge(drawingHost, registry),
+        llm: opts.agent.llm,
+        chats: opts.agent.chatsDir ? new ChatHistoryStore(opts.agent.chatsDir) : undefined,
+        run: opts.agent.run
+      })
+    : undefined
+  const host: McpHost = agent ? withAgentTools(drawingHost, agent, { timeoutMs: opts.agent?.timeoutMs }) : drawingHost
   const root = opts.lockRoot
   let stopped = false
+  /** A running agent turn is stopped and closed first, so the documents are written / the server stops with no turn open. */
+  const stopAgent = async (): Promise<void> => {
+    agent?.runner.stop()
+    await agent?.runner.whenIdle()
+  }
   const stopAll = async (): Promise<void> => {
     stopped = true
+    await stopAgent()
     await server.stop()
     if (root) releaseLock(root, process.pid)
   }
   const handover = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     await new Promise<void>((resolve) => req.once('end', resolve).resume()) // the body is `{}` and not used
+    await stopAgent()
     const list = await writeHandover(documents, join(root!, 'handover', String(Date.now())))
     if (root) releaseLock(root, process.pid) // before the answer: the window may start its own server right away
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -99,7 +147,7 @@ export async function startHeadless(opts: HeadlessOptions): Promise<Headless> {
   const holder = root ? readLiveLock(root) : null
   if (holder) {
     const error = `${describeHolder(holder)} Use that one, or close it first.`
-    return { server, documents, host, url: null, error, stop: async () => undefined }
+    return { server, documents, host, agent, url: null, error, stop: async () => undefined }
   }
   const status = await server.start()
   if (root && status.running && status.url) {
@@ -110,6 +158,7 @@ export async function startHeadless(opts: HeadlessOptions): Promise<Headless> {
     server,
     documents,
     host,
+    agent,
     url: status.running ? status.url : null,
     error: status.error,
     stop: () => (stopped ? Promise.resolve() : stopAll())

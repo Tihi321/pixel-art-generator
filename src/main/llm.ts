@@ -403,4 +403,24 @@ export class LlmService {
     const primary = router.candidates(AGENT_ROLE, { agentModel: ref })[0]
     return { source: { router, role: AGENT_ROLE, modelRef: ref }, vision: !!primary?.vision, ref: primary?.ref }
   }
+
+  /** Whether a run for the artist role has a model now (MCP checks this before it starts a run): `modelRef`, else the saved selection, else the role's list. */
+  async checkAgentModel(modelRef?: string | null): Promise<{ ok: true; ref: string } | { ok: false; error: string }> {
+    let loaded: Loaded
+    try {
+      loaded = await this.get()
+    } catch (err) {
+      return { ok: false, error: `Could not set up the language models: ${err instanceof Error ? err.message : String(err)}` }
+    }
+    const { registry, router } = loaded
+    if (modelRef) {
+      const m = registry.getModel(registry.resolve(modelRef))
+      if (!m || !m.provider.available || !m.provider.client) {
+        return { ok: false, error: `Model "${modelRef}" is not available (unknown, or its provider is off or has no key). list_models shows the models that are.` }
+      }
+    }
+    const first = router.candidates(AGENT_ROLE, { agentModel: modelRef ?? (await this.selectedModel()) })[0]
+    if (!first) return { ok: false, error: 'No model is available for the artist: check config/providers.md, roles.md and the API keys (list_models).' }
+    return { ok: true, ref: first.ref }
+  }
 }

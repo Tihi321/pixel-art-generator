@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { ToolRegistry, createDefaultRegistry, createToolHost, defineTool, resultText } from '../../src/tools'
+import { ToolRegistry, createDefaultRegistry, createMemoryToolServices, createToolHost, defineTool, resultText } from '../../src/tools'
+import { DocumentSet } from '../../src/tools/documents'
 import { setup } from './helpers'
 
 const EXPECTED = [
@@ -127,5 +128,17 @@ describe('createToolHost', () => {
     await host.execute('add_frame', {}, sig)
     await host.endTurn({ rollback: true })
     expect(t.doc.frames).toHaveLength(2)
+  })
+
+  it('a turn ends on the document it began on when another document became current', async () => {
+    const documents = new DocumentSet()
+    const host = createToolHost(createDefaultRegistry(), () => ({ session: documents.session, services: createMemoryToolServices(), documents }))
+    const sig = new AbortController().signal
+    const first = documents.session
+    await host.beginTurn('Test turn')
+    expect((await host.execute('new_document', { width: 8, height: 8 }, sig)).isError).toBeFalsy()
+    expect(documents.session).not.toBe(first)
+    await host.endTurn()
+    expect(first.turnActive).toBe(false)
   })
 })

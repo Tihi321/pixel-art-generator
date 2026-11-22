@@ -97,7 +97,7 @@ export type AgentStopReason = 'completed' | 'max_steps' | 'aborted' | 'error'
 
 /** What main pushes to the Chat panel. Every event carries the run it belongs to. */
 export type AgentUiEvent = { runId: string } & (
-  | { type: 'start'; label: string; text: string }
+  | { type: 'start'; label: string; text: string; /** The conversation the run belongs to (absent in chats saved before PAR-22). */ chatId?: string }
   | { type: 'step'; step: number; maxSteps: number; mode: 'native' | 'json' }
   | { type: 'text'; text: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
