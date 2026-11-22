@@ -5,3 +5,5 @@
 {"ts":"2026-11-22T21:28:44Z","actor":"implement","type":"slice.done","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"Part A committed f5aaddf","data":{"tasks":["A1","A2","A3"]}}
 {"ts":"2026-11-22T21:28:44Z","actor":"implement","type":"verify.passed","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"542 tests pass, typecheck and lint clean; diff reviewed","data":{"tests":542}}
 {"ts":"2026-11-22T21:28:44Z","actor":"implement","type":"changelog.written","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"changelog.md in f5aaddf; status stays in-progress for the checker"}
+{"ts":"2026-11-22T21:58:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"round 1 FAIL on A-1: guard counted any mutating tool","data":{"round":1,"verdict":"FAIL","finding":"A-1"}}
+{"ts":"2026-11-22T21:58:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"re-check PASS after polish 3685e83","data":{"round":"re-check","verdict":"PASS","commit":"3685e83"}}
