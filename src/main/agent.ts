@@ -309,7 +309,8 @@ export class AgentRunner {
         usage: result.usage,
         costUsd: result.costUsd,
         ...(result.model ? { model: result.model } : {}),
-        ...(error ? { error } : {})
+        ...(error ? { error } : {}),
+        ...(result.repeatStop ? { repeatStop: true as const } : {})
       })
     } catch (err) {
       // Not expected: runAgent never throws. Keep the document consistent anyway.

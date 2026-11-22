@@ -159,6 +159,12 @@ describe('artist agent over MCP', () => {
     const id3 = parse(await host2.execute('start_agent_run', { text: 'x'.repeat(10_000) }, sig))['runId'] as string
     await host2.execute('stop_agent_run', { runId: id3 }, sig)
     expect(parse(await host2.execute('get_agent_run', { runId: id3 }, sig))['text']).toBe(`${'x'.repeat(4000)}…`)
+    // a run the repeat guard ended is flagged, its state stays completed
+    const looped = createAgent({ bridge, llm: fakeLlm(new MockProvider('mock')), run: async () => ({ reason: 'completed', repeatStop: true, messages: [], steps: 2, usage: zero, costUsd: 0 }) })
+    const host4 = withAgentTools(baseHost, looped)
+    const id4 = parse(await host4.execute('start_agent_run', { text: 'loop' }, sig))['runId'] as string
+    await looped.runner.whenIdle()
+    expect(parse(await host4.execute('get_agent_run', { runId: id4 }, sig))).toMatchObject({ state: 'completed', repeatStop: true })
     let closed = false
     const host3 = withAgentTools(baseHost, agent, { closed: () => closed })
     closed = true
@@ -183,6 +189,7 @@ describe('artist agent over MCP', () => {
     done('c', 'completed')
     expect(log.get('c')!.stoppedBy).toBeUndefined()
     expect(log.get('c')!.timedOut).toBeUndefined()
+    expect(log.get('c')!.repeatStop).toBeUndefined()
     log.begin('a', 't', 'mcp')
     log.markStopped('a')
     log.markTimedOut('a')

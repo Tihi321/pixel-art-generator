@@ -113,7 +113,9 @@ export type AgentUiEvent = { runId: string } & (
     }
   | { type: 'usage'; usage: AgentUsage; costUsd: number; model?: string }
   | { type: 'error'; message: string }
-  | { type: 'done'; reason: AgentStopReason; steps: number; usage: AgentUsage; costUsd: number; model?: string; error?: string }
+  | { type: 'done'; reason: AgentStopReason; steps: number; usage: AgentUsage; costUsd: number; model?: string; error?: string
+      /** The repeat guard ended the run (see AgentResult.repeatStop). */
+      repeatStop?: true }
 )
 
 export interface LlmModelInfo {
