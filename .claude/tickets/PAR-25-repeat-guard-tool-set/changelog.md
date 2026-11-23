@@ -81,3 +81,38 @@ User words: "fix this small issue on pixel note". `remap_to_palette` removed fro
 Test: no new `it`. `changesPicture('draw_grid')` true and `changesPicture('remap_to_palette')` false added at the start of the existing guard `it` in `tests/llm/agent.test.ts` (no test touched `changesPicture` directly).
 
 Failing first on 3685e83 (fix not yet applied): `AssertionError: expected true to be false // Object.is equality` (tests/llm/agent.test.ts, the `remap_to_palette` expectation).
+
+## Part B (2026-11-23)
+
+Strata is the artist's vision model. Branch `PAR-25_strata-vision` (cut from master 820f2e9), one commit `PAR-25: Strata is the artist's vision model (seed and a migration)`. Condition met: creative-hub HUB-44 K5 ran three vision runs on Strata on 2026-11-22 (b1055f66, d73c4e53, 9dbc81fd), all `completed` (two by the repeat guard, one by the model's done), all three mushrooms.
+
+Files:
+- `seed/config/providers.md`: the `acp` row `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs` gets `vision: true` (comment: sees the previews, HUB-44 K5). Prose in the provider notes: "Its models are text only" now says text only unless a row says `vision: true` (the Strata row does); "Pixel Studio has no local vision model: ..." now says Strata through the proxy is the local vision model and that Inkling stays unusable for the artist (32768 context smaller than the artist's prompt). README had no such sentence.
+- `src/llm/seedMigration.ts`: `STRATA_VISION_MIGRATION = 'acp-strata-vision-v1'` and `migrateStrataVision(configDir)`: once; only the `acp` row with that exact id and no `vision` key gets `vision: true` (inserted after `tools`); any `vision` value, other rows and keys stay; an unreadable providers.md leaves a warning and is not recorded.
+- `src/llm/setup.ts`: calls it after `migrateAcpPort`, same `.catch(() => undefined)`.
+- `tests/llm/customProviders.test.ts`: one new `it` (row gets vision once, changed `['providers.md']`; second call nothing; `vision: false` stays; unreadable file warns and is not recorded).
+- `tests/main/agentLlm.test.ts`: one expectation changed, the seed's Strata default now resolves `vision: true` (it asserted false).
+- `ROADMAP.md`: Part B sentence appended to the PAR-25 bullet.
+
+Failing first (before the migration existed): `TypeError: migrateStrataVision is not a function` at `tests/llm/customProviders.test.ts:295` (1 failed, 17 passed).
+
+Verification: `yarn test` 52 files, 544 tests passed (the `agentLlm` expectation failed once until updated, see above); `yarn typecheck` and `yarn lint` exit 0.
+
+Not run: Pixel Studio (no start, no `yarn build`); the live folder `C:\Users\Infplane\PixelStudio` is untouched and gets the change from the migration at the next start. A vision run on the changed config is not made.
+
+Deviation: `tests/main/agentLlm.test.ts` changed (not named in the plan), a consequence of the seed row.
+Commit: see git log of `PAR-25_strata-vision`; not pushed or merged.
+
+## Part B, polish 1 (2026-11-23)
+
+A checker failed one point: `migrateStrataVision` re-serialized the whole front matter (`doc.toString`), so on the master seed 263 lines changed (comment alignment, `[a]` became `[ a ]`, a comment moved).
+
+Fix (`src/llm/seedMigration.ts`, new `insertVisionLine`): the YAML parse still decides (acp provider, the exact row, no `vision` key; any `vision` value stays; unreadable or unparsable: warning, not recorded; nothing to change: recorded). The position comes from the parsed nodes' `range`: the `tools` pair's key (else the `id` pair's key) of that row gives the indentation (its column) and the end of its line; one line `vision: true` plus the file's own line ending is spliced into the original text there (BOM and every other byte untouched). The result is parsed again: the row must have `vision: true` and, with that key removed, the data must deep-equal the original parse; otherwise nothing is written, a warning is given and the migration is not recorded. `migrateAcpPort` still re-serializes (out of scope, see discoveries).
+
+Test: the existing `it` in `tests/llm/customProviders.test.ts` got one case: the real seed text without the Strata `vision: true` line (aligned comments, flow lists, comments after keys), with a BOM, LF and CRLF; output lines = input lines + 1, the inserted line is `        vision: true`, removing it gives the input byte for byte.
+
+Failing first on 33d81d1 (src change stashed): `AssertionError: expected [ '﻿---', …(303) ] to have a length of 302 but got 304`.
+
+Diff size on the master seed (`git show master:seed/config/providers.md`, 301 lines): 1 line inserted (line 141) for LF and for CRLF, the rest identical.
+
+Verification: `yarn test` 52 files, 544 tests passed; `yarn typecheck` and `yarn lint` exit 0.

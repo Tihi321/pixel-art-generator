@@ -7,3 +7,6 @@
 {"ts":"2026-11-22T21:28:44Z","actor":"implement","type":"changelog.written","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"changelog.md in f5aaddf; status stays in-progress for the checker"}
 {"ts":"2026-11-22T21:58:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"round 1 FAIL on A-1: guard counted any mutating tool","data":{"round":1,"verdict":"FAIL","finding":"A-1"}}
 {"ts":"2026-11-22T21:58:00Z","actor":"director-scribe","type":"checker.verdict","request":"REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"re-check PASS after polish 3685e83","data":{"round":"re-check","verdict":"PASS","commit":"3685e83"}}
+{"ts":"2026-11-23T08:00:00Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"part B on PAR-25_strata-vision"}
+{"ts":"2026-11-23T08:10:00Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"part B: 544 tests, typecheck, lint pass"}
+{"ts":"2026-11-23T08:11:00Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0031","ticket":"PAR-25-repeat-guard-tool-set","detail":"changelog.md Part B; status stays in-progress"}
