@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: done
 request: creative-hub/REQ-0031
 repos: [pixel-art-generator]
 branch: PAR-25_repeat-guard-tool-set
-updated: 2026-11-22
+updated: 2026-11-23
 ---
 
 # PAR-25 The artist agent stops when a step redraws the same picture; an optional `no-files` tool set; Strata as a vision model only after the live round

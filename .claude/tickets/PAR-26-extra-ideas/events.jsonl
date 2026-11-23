@@ -3,3 +3,5 @@
 {"ts":"2026-11-22T22:30:45Z","actor":"implement","type":"implement.started","request":"creative-hub/REQ-0031","ticket":"PAR-26-extra-ideas","detail":"branch PAR-26_extra-ideas from master 5b63ec0"}
 {"ts":"2026-11-22T22:33:41Z","actor":"implement","type":"verify.passed","request":"creative-hub/REQ-0031","ticket":"PAR-26-extra-ideas","detail":"test 543 pass, typecheck, lint exit 0"}
 {"ts":"2026-11-22T22:33:41Z","actor":"implement","type":"changelog.written","request":"creative-hub/REQ-0031","ticket":"PAR-26-extra-ideas","detail":"changelog.md written"}
+{"ts":"2026-11-23T09:10:00Z","actor":"director-scribe","type":"checker.verdict","request":"creative-hub/REQ-0031","ticket":"PAR-26-extra-ideas","detail":"director-checker PASS (merged 820f2e9)","data":{"verdict":"PASS"}}
+{"ts":"2026-11-23T09:10:00Z","actor":"director-scribe","type":"ticket.done","request":"creative-hub/REQ-0031","ticket":"PAR-26-extra-ideas","detail":"merged and pushed to master (820f2e9)"}

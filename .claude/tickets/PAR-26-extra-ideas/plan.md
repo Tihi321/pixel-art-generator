@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: done
 request: creative-hub/REQ-0031
 repos: [pixel-art-generator]
 branch: PAR-26_extra-ideas
-updated: 2026-11-22
+updated: 2026-11-23
 ---
 
 # PAR-26 Extra Pixel ideas: picture-tool names checked, abort during the guard's read tested, config/app.json documented, the repeat guard's stop flagged in the run view, JSON retries counted in usage
