@@ -102,3 +102,17 @@ Not run: Pixel Studio (no start, no `yarn build`); the live folder `C:\Users\Inf
 
 Deviation: `tests/main/agentLlm.test.ts` changed (not named in the plan), a consequence of the seed row.
 Commit: see git log of `PAR-25_strata-vision`; not pushed or merged.
+
+## Part B, polish 1 (2026-11-23)
+
+A checker failed one point: `migrateStrataVision` re-serialized the whole front matter (`doc.toString`), so on the master seed 263 lines changed (comment alignment, `[a]` became `[ a ]`, a comment moved).
+
+Fix (`src/llm/seedMigration.ts`, new `insertVisionLine`): the YAML parse still decides (acp provider, the exact row, no `vision` key; any `vision` value stays; unreadable or unparsable: warning, not recorded; nothing to change: recorded). The position comes from the parsed nodes' `range`: the `tools` pair's key (else the `id` pair's key) of that row gives the indentation (its column) and the end of its line; one line `vision: true` plus the file's own line ending is spliced into the original text there (BOM and every other byte untouched). The result is parsed again: the row must have `vision: true` and, with that key removed, the data must deep-equal the original parse; otherwise nothing is written, a warning is given and the migration is not recorded. `migrateAcpPort` still re-serializes (out of scope, see discoveries).
+
+Test: the existing `it` in `tests/llm/customProviders.test.ts` got one case: the real seed text without the Strata `vision: true` line (aligned comments, flow lists, comments after keys), with a BOM, LF and CRLF; output lines = input lines + 1, the inserted line is `        vision: true`, removing it gives the input byte for byte.
+
+Failing first on 33d81d1 (src change stashed): `AssertionError: expected [ '﻿---', …(303) ] to have a length of 302 but got 304`.
+
+Diff size on the master seed (`git show master:seed/config/providers.md`, 301 lines): 1 line inserted (line 141) for LF and for CRLF, the rest identical.
+
+Verification: `yarn test` 52 files, 544 tests passed; `yarn typecheck` and `yarn lint` exit 0.

@@ -1,5 +1,6 @@
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { isMap, isScalar, isSeq, parseDocument } from 'yaml'
 import type { Document, Node, YAMLMap, YAMLSeq } from 'yaml'
 import { providersSchema } from './config'
@@ -185,8 +186,34 @@ export const STRATA_VISION_MIGRATION = 'acp-strata-vision-v1'
 const STRATA_VISION_ROW = 'strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
 
 /**
+ * The text of providers.md with one new line, `vision: true`, directly after the `tools` line of the row (after its `id` line when it has no
+ * `tools`), indented like that line and ended like the file's own lines. Nothing else changes. Null when the row's position is not found or
+ * the result does not parse back to the same data plus `vision: true`.
+ */
+function insertVisionLine(mine: Parsed, row: YAMLMap): string | null {
+  const keyed = (name: string) => row.items.find((pair) => isScalar(pair.key) && pair.key.value === name)
+  const after = keyed('tools') ?? keyed('id')
+  const key = after?.key as Node | undefined
+  if (!after || !key?.range) return null
+  const lineStart = mine.front.lastIndexOf('\n', key.range[0] - 1) + 1
+  const valueEnd = (after.value as Node | null)?.range?.[1] ?? key.range[1]
+  const newline = mine.front.indexOf('\n', valueEnd)
+  if (newline === -1) return null
+  const at = mine.frontStart + newline + 1
+  const out = mine.text.slice(0, at) + ' '.repeat(key.range[0] - lineStart) + 'vision: true' + mine.nl + mine.text.slice(at)
+  const again = parseProviders(out, 'providers.md')
+  if (typeof again === 'string') return null
+  const acp = again.providers.items.find((item) => idOf(item) === 'acp')
+  const models = isMap(acp) ? acp.get('models', true) : undefined
+  const arow = isSeq(models) ? models.items.find((item) => idOf(item) === STRATA_VISION_ROW) : undefined
+  if (!isMap(arow) || arow.get('vision') !== true) return null
+  arow.delete('vision')
+  return isDeepStrictEqual(again.doc.toJS(), mine.doc.toJS()) ? out : null
+}
+
+/**
  * Makes Strata the artist's vision model, once (`acp-strata-vision-v1` in seed-state.json): in the `acp` provider of providers.md, the `models`
- * row whose `id` is exactly `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs` and that has no `vision` key gets `vision: true` (after `tools`).
+ * row whose `id` is exactly `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs` and that has no `vision` key gets `vision: true` (after `tools`) as ONE new line spliced into the original text: nothing else in the file changes.
  * A row with any `vision` value (the user's choice), every other row and key stay. A providers.md that can't be read is left alone with a
  * warning and the migration is not recorded.
  */
@@ -207,12 +234,12 @@ export async function migrateStrataVision(configDir: string): Promise<{ changed:
     const models = isMap(acp) ? acp.get('models', true) : undefined
     const row = isSeq(models) ? models.items.find((item) => idOf(item) === STRATA_VISION_ROW) : undefined
     if (isMap(row) && !row.has('vision')) {
-      const at = row.items.findIndex((pair) => isScalar(pair.key) && pair.key.value === 'tools')
-      const pair = mine.doc.createPair('vision', true)
-      if (at === -1) row.items.push(pair)
-      else row.items.splice(at + 1, 0, pair)
-      const front = mine.doc.toString({ lineWidth: 0 }).replace(/\n/g, mine.nl)
-      await fs.writeFile(file, mine.text.slice(0, mine.frontStart) + front + mine.text.slice(mine.frontStart + mine.front.length), 'utf8')
+      const spliced = insertVisionLine(mine, row)
+      if (spliced === null) {
+        result.warnings.push('providers.md: the Strata row could not be changed without reformatting the file, so Strata was not made a vision model')
+        return result
+      }
+      await fs.writeFile(file, spliced, 'utf8')
       result.changed.push('providers.md')
     }
   }

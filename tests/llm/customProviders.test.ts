@@ -302,6 +302,22 @@ providers:
     await writeFile(file(), mk('\n        vision: false'))
     expect((await migrateStrataVision(dir)).changed).toEqual([]) // the user's own value stays
     expect(await readFile(file(), 'utf8')).toBe(mk('\n        vision: false'))
+    // a realistic old file (the seed without the vision line of the Strata row: aligned comments, flow lists, comments after keys, a BOM):
+    // the migration inserts ONE line and keeps every other byte, with LF and with CRLF
+    const seedLines = (await readFile(path.join(seedDir, 'providers.md'), 'utf8')).replace(/\r\n/g, '\n').split('\n')
+    const rowAt = seedLines.indexOf(`      - id: ${id}`)
+    expect(seedLines[rowAt + 4]).toMatch(/^ {8}vision: true/)
+    const oldLines = [...seedLines.slice(0, rowAt + 4), ...seedLines.slice(rowAt + 5)]
+    for (const nl of ['\n', '\r\n']) {
+      await rm(path.join(dir, SEED_STATE_FILE))
+      const old = '﻿' + oldLines.join(nl)
+      await writeFile(file(), old)
+      expect(await migrateStrataVision(dir)).toEqual({ changed: ['providers.md'], warnings: [] })
+      const out = (await readFile(file(), 'utf8')).split(nl)
+      expect(out).toHaveLength(oldLines.length + 1)
+      expect(out[rowAt + 4]).toBe('        vision: true')
+      expect([...out.slice(0, rowAt + 4), ...out.slice(rowAt + 5)].join(nl)).toBe(old)
+    }
     await writeFile(file(), '---\nkind: providers\nproviders: [\n---\n')
     await rm(path.join(dir, SEED_STATE_FILE))
     expect((await migrateStrataVision(dir)).warnings).toHaveLength(1) // unreadable: warned, not recorded
