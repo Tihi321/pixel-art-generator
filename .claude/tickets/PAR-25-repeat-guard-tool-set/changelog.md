@@ -81,3 +81,24 @@ User words: "fix this small issue on pixel note". `remap_to_palette` removed fro
 Test: no new `it`. `changesPicture('draw_grid')` true and `changesPicture('remap_to_palette')` false added at the start of the existing guard `it` in `tests/llm/agent.test.ts` (no test touched `changesPicture` directly).
 
 Failing first on 3685e83 (fix not yet applied): `AssertionError: expected true to be false // Object.is equality` (tests/llm/agent.test.ts, the `remap_to_palette` expectation).
+
+## Part B (2026-11-23)
+
+Strata is the artist's vision model. Branch `PAR-25_strata-vision` (cut from master 820f2e9), one commit `PAR-25: Strata is the artist's vision model (seed and a migration)`. Condition met: creative-hub HUB-44 K5 ran three vision runs on Strata on 2026-11-22 (b1055f66, d73c4e53, 9dbc81fd), all `completed` (two by the repeat guard, one by the model's done), all three mushrooms.
+
+Files:
+- `seed/config/providers.md`: the `acp` row `strata/qwen3.8-flash-next-unsloth-ud-iq4_xs` gets `vision: true` (comment: sees the previews, HUB-44 K5). Prose in the provider notes: "Its models are text only" now says text only unless a row says `vision: true` (the Strata row does); "Pixel Studio has no local vision model: ..." now says Strata through the proxy is the local vision model and that Inkling stays unusable for the artist (32768 context smaller than the artist's prompt). README had no such sentence.
+- `src/llm/seedMigration.ts`: `STRATA_VISION_MIGRATION = 'acp-strata-vision-v1'` and `migrateStrataVision(configDir)`: once; only the `acp` row with that exact id and no `vision` key gets `vision: true` (inserted after `tools`); any `vision` value, other rows and keys stay; an unreadable providers.md leaves a warning and is not recorded.
+- `src/llm/setup.ts`: calls it after `migrateAcpPort`, same `.catch(() => undefined)`.
+- `tests/llm/customProviders.test.ts`: one new `it` (row gets vision once, changed `['providers.md']`; second call nothing; `vision: false` stays; unreadable file warns and is not recorded).
+- `tests/main/agentLlm.test.ts`: one expectation changed, the seed's Strata default now resolves `vision: true` (it asserted false).
+- `ROADMAP.md`: Part B sentence appended to the PAR-25 bullet.
+
+Failing first (before the migration existed): `TypeError: migrateStrataVision is not a function` at `tests/llm/customProviders.test.ts:295` (1 failed, 17 passed).
+
+Verification: `yarn test` 52 files, 544 tests passed (the `agentLlm` expectation failed once until updated, see above); `yarn typecheck` and `yarn lint` exit 0.
+
+Not run: Pixel Studio (no start, no `yarn build`); the live folder `C:\Users\Infplane\PixelStudio` is untouched and gets the change from the migration at the next start. A vision run on the changed config is not made.
+
+Deviation: `tests/main/agentLlm.test.ts` changed (not named in the plan), a consequence of the seed row.
+Commit: see git log of `PAR-25_strata-vision`; not pushed or merged.

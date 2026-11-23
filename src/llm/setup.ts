@@ -1,7 +1,7 @@
 import { defaultConfigDir, ensureConfigDir, ModelRegistry } from './registry'
 import type { RegistryOptions } from './registry'
 import { ModelRouter } from './router'
-import { migrateAcpPort, migrateProviders, migrateStrataLoaded } from './seedMigration'
+import { migrateAcpPort, migrateProviders, migrateStrataLoaded, migrateStrataVision } from './seedMigration'
 import type { RouterOptions } from './router'
 
 export interface CreateLlmOptions extends RegistryOptions {
@@ -28,6 +28,8 @@ export async function createLlm(opts: CreateLlmOptions = {}): Promise<{ registry
   if (opts.seedDir) await migrateStrataLoaded(configDir, opts.seedDir).catch(() => undefined)
   // the ACP proxy moved from port 7461 to 8787 (acp-port-8787-v1)
   if (opts.seedDir) await migrateAcpPort(configDir).catch(() => undefined)
+  // Strata sees the previews (acp-strata-vision-v1)
+  if (opts.seedDir) await migrateStrataVision(configDir).catch(() => undefined)
   const registry = new ModelRegistry(configDir, opts)
   await registry.load()
   if (opts.discover !== false) {

@@ -103,7 +103,7 @@ describe('LlmService', () => {
     // an explicit ref wins over the saved one
     expect(await svc.resolveModel('lmstudio/google/gemma-4-e4b')).toMatchObject({ vision: true, ref: 'lmstudio/google/gemma-4-e4b' })
     await svc.setSelectedModel(null)
-    expect(await svc.resolveModel()).toMatchObject({ vision: false, ref: 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs' }) // the local default has no vision (the tools flag is asserted in registry.test.ts)
+    expect(await svc.resolveModel()).toMatchObject({ vision: true, ref: 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs' }) // the local default sees the previews (PAR-25 part B; the tools flag is asserted in registry.test.ts)
   })
 
   it('checkAgentModel: ok for the default, an error for an unknown ref and for a role whose only model has no key', async () => {

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -7,7 +8,7 @@ import { parseMdWith } from '../../src/llm/md'
 import { providersSchema, rolesSchema } from '../../src/llm/config'
 import { checkBaseUrl, keyNameOf, providerIdsOf, removeCustomProviderEntry, slugOf, upsertCustomProvider, type CustomProviderInput } from '../../src/llm/customProviders'
 import { ModelRegistry } from '../../src/llm/registry'
-import { migrateAcpPort, migrateProviders, migrateStrataLoaded, SEED_STATE_FILE } from '../../src/llm/seedMigration'
+import { migrateAcpPort, migrateStrataVision, migrateProviders, migrateStrataLoaded, SEED_STATE_FILE } from '../../src/llm/seedMigration'
 import { createLlm } from '../../src/llm/setup'
 
 const seedDir = fileURLToPath(new URL('../../seed/config', import.meta.url))
@@ -272,6 +273,39 @@ providers:
     await writeFile(file(), mk('http://127.0.0.1:9999/v1'))
     expect((await migrateAcpPort(dir)).changed).toEqual([]) // a different value is kept
     expect(await readFile(file(), 'utf8')).toBe(mk('http://127.0.0.1:9999/v1'))
+  })
+
+  it('acp-strata-vision-v1 sets vision on the exact Strata row that has none, once', async () => {
+    const id = 'strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
+    const mk = (row: string) => `---
+kind: providers
+providers:
+  - id: acp
+    kind: openai-compat
+    base_url: http://127.0.0.1:8787/v1
+    models:
+      - id: ${id}
+        tools: false${row}
+        extra_body: { reasoning_effort: none }
+      - id: ${id}-other
+        tools: false
+---
+`
+    await writeFile(file(), mk(''))
+    expect(await migrateStrataVision(dir)).toEqual({ changed: ['providers.md'], warnings: [] })
+    expect(await readFile(file(), 'utf8')).toBe(mk('\n        vision: true')) // after tools, the other row untouched
+    expect((JSON.parse(await readFile(path.join(dir, SEED_STATE_FILE), 'utf8')) as { migrations: string[] }).migrations).toEqual(['acp-strata-vision-v1'])
+    await writeFile(file(), mk(''))
+    expect((await migrateStrataVision(dir)).changed).toEqual([]) // once
+    expect(await readFile(file(), 'utf8')).toBe(mk(''))
+    await rm(path.join(dir, SEED_STATE_FILE))
+    await writeFile(file(), mk('\n        vision: false'))
+    expect((await migrateStrataVision(dir)).changed).toEqual([]) // the user's own value stays
+    expect(await readFile(file(), 'utf8')).toBe(mk('\n        vision: false'))
+    await writeFile(file(), '---\nkind: providers\nproviders: [\n---\n')
+    await rm(path.join(dir, SEED_STATE_FILE))
+    expect((await migrateStrataVision(dir)).warnings).toHaveLength(1) // unreadable: warned, not recorded
+    expect(existsSync(path.join(dir, SEED_STATE_FILE))).toBe(false)
   })
 
   it('createLlm migrates an existing config folder on start, and seeds a fresh one with acp', async () => {
